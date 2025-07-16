@@ -1,0 +1,81 @@
+{
+  "lender": {
+    "values": [
+      {
+        "value": "TSB Bank",
+        "start": 25632,
+        "end": 25742
+      }
+    ],
+    "confidence": 1.0
+  },
+  "term": {
+    "values": [
+      {
+        "value": "35 years",
+        "start": 26088,
+        "end": 27820
+      }
+    ],
+    "confidence": 1.0
+  },
+  "initial_amount": {
+    "values": [
+      {
+        "value": "\u00a3243,245.00",
+        "start": 26088,
+        "end": 27820
+      }
+    ],
+    "confidence": 1.0
+  },
+  "early_repayment_section": {
+    "values": [
+      {
+        "value": 8,
+        "start": 30268,
+        "end": 31116
+      }
+    ],
+    "confidence": 1.0
+  },
+  "other_costs": {
+    "values": [
+      {
+        "value": "One off costs:\nProduct fee: \u00a3995.00\n\nRecurring costs:\nNone",
+        "start": {
+          "one_off_costs": 28366,
+          "recurring_costs": 28579
+        },
+        "end": {
+          "one_off_costs": 28579,
+          "recurring_costs": 28622
+        }
+      }
+    ],
+    "confidence": {
+      "one_off_costs": 0.8,
+      "recurring_costs": 1.0
+    }
+  },
+  "expiry_date": {
+    "values": [
+      {
+        "value": "21/12/2024",
+        "start": 21710,
+        "end": 21726
+      }
+    ],
+    "confidence": 1
+  },
+  "special_conditions": {
+    "values": [
+      {
+        "value": "MOAS0402 - When you take out this mortgage you must repay any mortgage on any property you are selling. The three exceptions to this requirement are where: (1) you are unconditionally bound to sell the property you are selling and its proceeds will be enough to repay any mortgage on it. You must be bound to complete the sales within three months of taking out our mortgage. (2) you have told us that any mortgage is not to be repaid and we have agreed to this. (3) the property to be mortgaged is in Scotland, where you must arrange for any existing mortgage to be repaid within three months of our mortgage. If you own a property in the United Kingdom, either alone or with someone else, which you are not selling and which has any mortgages on it, you must arrange for any such mortgage to be repaid unless we agree otherwise.",
+        "start": 20237,
+        "end": 21069
+      }
+    ],
+    "confidence": 1.0
+  }
+}

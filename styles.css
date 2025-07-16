@@ -1,0 +1,190 @@
+/* ------------------------------------------------------------------
+   1.  Global typography
+------------------------------------------------------------------*/
+body,
+#renderedText,
+#report{
+  font-family:Arial,Helvetica,sans-serif;
+  font-size:14px;
+  line-height:1.6;
+}
+
+#report  h1{font-size:22px;color:#1574e6;margin-top:.5rem;font-weight:700;}
+#report  h2{font-size:18px;color:#1574e6;margin-top:1.2rem;font-weight:700;}
+#report  h3{font-size:16px;color:#1574e6;margin-top:1rem;font-weight:700;}
+#renderedText h1{font-size:22px;color:var(--primary-green);margin-top:.5rem;font-weight:700;}
+#renderedText h2{font-size:18px;color:var(--primary-green);margin-top:1.2rem;font-weight:700;}
+#renderedText h3{font-size:16px;color:var(--primary-green);margin-top:1rem;font-weight:700;}
+
+/* ------------------------------------------------------------------
+   2.  CSS variables
+------------------------------------------------------------------*/
+:root{
+  /* keyword highlight colours */
+  --high:#d4edda;
+  --mid :#fff3cd;
+  --low :#f8d7da;
+
+  /* theme colors */
+  --primary-green: #07581b;
+  --primary-green-light: #e8f5e8;
+  --primary-green-dark: #054a17;
+
+  /* footer & layout metrics */
+  --footer-h:56px;          /* footer height (py-2)      */
+  --btn-gap :1.25rem;       /* spare gap above footer    */
+}
+
+/* ------------------------------------------------------------------
+   3.  Keyword highlights
+------------------------------------------------------------------*/
+.keyword   {cursor:pointer;text-decoration:underline;}
+.conf-high {background:var(--high);}
+.conf-mid  {background:var(--mid);}
+.conf-low  {background:var(--low);}
+.marked    {background:#ffd966;}
+
+/* ------------------------------------------------------------------
+   4.  Drag-and-drop highlight
+------------------------------------------------------------------*/
+.border-dashed-drop{
+  border:2px dashed transparent;
+  transition:border-color .2s ease;
+}
+.border-dashed-drop.drop-hover{border-color:#0d6efd;}
+
+/* ------------------------------------------------------------------
+   5.  Card headers – same height, centred content
+------------------------------------------------------------------*/
+.card-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-height:3rem;
+  font-weight:600;
+  font-size:1rem;
+}
+
+/* ------------------------------------------------------------------
+   6.  Mini PDF preview (FIXED VERSION)
+------------------------------------------------------------------*/
+#pdfPreview{
+  width:110px;
+  height:147px;
+  border:1px solid #888;
+  border-radius:.25rem;
+  overflow:hidden;
+  background:#fff;
+  box-shadow:0 0.25rem 0.75rem rgba(0,0,0,.15);
+  transition:all .3s ease;
+  transform-origin:bottom left;
+  position:relative;
+}
+
+#pdfPreview:hover{
+  width:440px;
+  height:588px;
+  overflow:auto;
+  transform:translate(-220px,-441px);
+  z-index:1080;
+  border:2px solid var(--primary-green);
+  box-shadow:0 1rem 3rem rgba(0,0,0,.3);
+}
+
+#pdfPreview embed{
+  width:100%;
+  height:100%;
+}
+
+/* ------------------------------------------------------------------
+   7.  Controls row spacing (download + mini preview)
+------------------------------------------------------------------*/
+#workspace > .row.g-3 + #docControls{
+  margin-top:1rem;
+  padding-bottom:0.5rem;
+}
+
+/* ------------------------------------------------------------------
+   8.  Extra bottom padding for workspace (so large preview never overlaps)
+------------------------------------------------------------------*/
+#workspace{padding-bottom:calc(var(--footer-h) + 190px);}
+
+/* ------------------------------------------------------------------
+   9.  Navbar title – uniform typography
+------------------------------------------------------------------*/
+#navbarTitle{
+  font:700 1.6rem/1.25 'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  padding: 0.75rem 0 !important;
+}
+
+#docControls{
+   display:flex;
+   justify-content:flex-start;
+   align-items:flex-start;
+}
+
+#hero{min-height:80vh;}
+
+/* ------------------------------------------------------------------
+   10. iPhone app styling
+------------------------------------------------------------------*/
+.btn-primary {
+  background-color: white !important;
+  border-color: var(--primary-green) !important;
+  color: var(--primary-green) !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-green-light) !important;
+  border-color: var(--primary-green) !important;
+  color: var(--primary-green) !important;
+}
+
+.btn-primary:active {
+  background-color: var(--primary-green-dark) !important;
+  border-color: var(--primary-green-dark) !important;
+  color: white !important;
+}
+
+.card {
+  border-radius: 16px !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+}
+
+.btn-outline-secondary {
+  border-color: var(--primary-green) !important;
+  color: var(--primary-green) !important;
+  border-radius: 8px !important;
+}
+
+.btn-outline-secondary:hover {
+  background-color: var(--primary-green-light) !important;
+  border-color: var(--primary-green) !important;
+  color: var(--primary-green) !important;
+}
+
+/* ------------------------------------------------------------------
+   11. Layout fixes
+------------------------------------------------------------------*/
+/* Remove body padding to eliminate header gap */
+body {
+  padding-top: 0 !important;
+}
+
+/* Updated navbar styling for new layout */
+.navbar {
+  min-height: 100px !important;
+  padding-bottom: 1rem !important;
+}
+
+/* Fix download button positioning */
+#downloadBtn {
+  position: fixed !important;
+  right: 1rem !important;
+  bottom: 1rem !important;
+  z-index: 1070 !important;
+}
