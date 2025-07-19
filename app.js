@@ -18,6 +18,47 @@ let rawText, keyData, reportTemplate, isEditing = false;
 let selectedFile = null; 
 
 /* ------------------------------------------------------------- */
+/*  Loading phrases for entertainment                            */
+/* ------------------------------------------------------------- */
+const loadingPhrases = [
+  "Analyzing mortgage terms with AI precision...",
+  "Extracting key financial details from your document...",
+  "Cross-referencing lender requirements...",
+  "Identifying potential red flags and opportunities...",
+  "Calculating repayment scenarios and projections...",
+  "Reviewing special conditions and clauses...",
+  "Generating comprehensive risk assessment...",
+  "Comparing against industry standards...",
+  "Finalizing your personalized mortgage report..."
+];
+
+let phraseInterval;
+
+function startLoadingPhrases() {
+  let currentPhraseIndex = 0;
+  const phraseElement = $('#loadingPhrase');
+  
+  phraseElement.text(loadingPhrases[currentPhraseIndex]).css('opacity', 1);
+  
+  phraseInterval = setInterval(() => {
+    phraseElement.css('opacity', 0);
+    
+    setTimeout(() => {
+      currentPhraseIndex = (currentPhraseIndex + 1) % loadingPhrases.length;
+      phraseElement.text(loadingPhrases[currentPhraseIndex]).css('opacity', 1);
+    }, 500); // Wait for fade out to complete
+  }, 3000); // Change phrase every 3 seconds
+}
+
+function stopLoadingPhrases() {
+  if (phraseInterval) {
+    clearInterval(phraseInterval);
+    phraseInterval = null;
+  }
+  $('#loadingPhrase').css('opacity', 0);
+}
+
+/* ------------------------------------------------------------- */
 /*  Boot                                                         */
 /* ------------------------------------------------------------- */
 $(function () {
@@ -93,7 +134,8 @@ async function startAnalytics(){
   if(!selectedFile) return;
 
   $('#loadingOverlay').removeClass('d-none');  
- $('#pdfEmbed').attr('src', URL.createObjectURL(selectedFile) + '#zoom=150' );
+  startLoadingPhrases();
+ $('#pdfEmbed').attr('src', URL.createObjectURL(selectedFile) + '#view=FitH');
  $('#pdfPreview').removeClass('d-none');
 
   try {
@@ -105,12 +147,14 @@ async function startAnalytics(){
     $('#workspace, #downloadBtn').removeClass('d-none');
     $('#docControls').removeClass('d-none'); 
     $('#downloadBtn').show();
+    stopLoadingPhrases();
     $('#loadingOverlay').addClass('d-none');
 
     $('#navbarTitle').text(
       'Elite Intelligence | mortgage report automation: intelligent analytics review'
     );
   } catch (error) {
+    stopLoadingPhrases();
     $('#loadingOverlay').addClass('d-none');
     $('#previewStage').removeClass('d-none');
     return;
