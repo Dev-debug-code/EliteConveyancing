@@ -63,37 +63,38 @@ body,
   min-height:3rem;
   font-weight:600;
   font-size:1rem;
+  background-color: var(--primary-green-light) !important;
+  border-top-left-radius: 16px !important;
+  border-top-right-radius: 16px !important;
 }
 
 /* ------------------------------------------------------------------
    6.  Mini PDF preview (FIXED VERSION)
 ------------------------------------------------------------------*/
+
 #pdfPreview{
-  width:110px;
-  height:147px;
-  border:1px solid #888;
-  border-radius:.25rem;
-  overflow:hidden;
-  background:#fff;
-  box-shadow:0 0.25rem 0.75rem rgba(0,0,0,.15);
-  transition:all .3s ease;
-  transform-origin:bottom left;
-  position:relative;
+  position: fixed;
+  bottom: 35px;
+  left: 7px;
+  width: 150px;
+  height: 200px;
+  border: 1px solid #888;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  transition: all .2s ease-in-out;
+  z-index: 1050;
 }
 
 #pdfPreview:hover{
-  width:440px;
-  height:588px;
-  overflow:auto;
-  transform:translate(-220px,-441px);
-  z-index:1080;
-  border:2px solid var(--primary-green);
-  box-shadow:0 1rem 3rem rgba(0,0,0,.3);
+  width: 400px;
+  height: 500px;
 }
 
 #pdfPreview embed{
-  width:100%;
-  height:100%;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 /* ------------------------------------------------------------------
@@ -113,14 +114,15 @@ body,
    9.  Navbar title – uniform typography
 ------------------------------------------------------------------*/
 #navbarTitle{
-  font:700 1.6rem/1.25 'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-  padding: 0.75rem 0 !important;
+  font:300 1.6rem/1.25 'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
 }
 
 #docControls{
    display:flex;
-   justify-content:flex-start;
+   justify-content:flex-end;
    align-items:flex-start;
+   position: relative;
+   margin-top: 1rem;
 }
 
 #hero{min-height:80vh;}
@@ -151,7 +153,7 @@ body,
 
 .card {
   border-radius: 16px !important;
-  border: none !important;
+  border: 1px solid var(--primary-green) !important;
   box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
 }
 
@@ -167,6 +169,11 @@ body,
   color: var(--primary-green) !important;
 }
 
+/* Loading spinner green color */
+.spinner-border.text-primary {
+  color: var(--primary-green) !important;
+}
+
 /* ------------------------------------------------------------------
    11. Layout fixes
 ------------------------------------------------------------------*/
@@ -177,14 +184,18 @@ body {
 
 /* Updated navbar styling for new layout */
 .navbar {
-  min-height: 100px !important;
+  min-height: 120px !important;
   padding-bottom: 1rem !important;
+  border-bottom: 1px solid var(--primary-green) !important;
+  background-color: var(--primary-green-light) !important;
+  position: relative !important;
 }
 
 /* Fix download button positioning */
 #downloadBtn {
-  position: fixed !important;
+  position: absolute !important;
   right: 1rem !important;
-  bottom: 1rem !important;
+  bottom: -4rem !important;
   z-index: 1070 !important;
 }
+
