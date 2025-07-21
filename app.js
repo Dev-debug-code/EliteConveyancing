@@ -685,50 +685,75 @@ function highlightSlice(start,end){
 
 async function downloadReportPDF(){
   const { jsPDF } = window.jspdf;
-  const margin=60;
+  const margin=40;
+  const pageWidth = 595.28;
+  const contentWidth = pageWidth - (margin * 2);
 
   const src=document.getElementById('report');
   const clone=src.cloneNode(true);
   clone.removeAttribute('style');
-  clone.style.width='750px';
-  clone.style.maxWidth='750px';
-  clone.style.lineHeight='1.8';
+  clone.style.width=`${contentWidth}px`;
+  clone.style.maxWidth=`${contentWidth}px`;
+  clone.style.lineHeight='1.6';
   clone.style.wordWrap='break-word';
   clone.style.overflowWrap='break-word';
-  clone.style.fontSize='14px';
+  clone.style.whiteSpace='normal';
+  clone.style.fontSize='12px';
   clone.style.fontFamily='Arial, sans-serif';
-  clone.style.padding='20px';
+  clone.style.padding='0';
+  clone.style.margin='0';
   clone.style.boxSizing='border-box';
+  clone.style.display='block';
   clone.classList.remove('overflow-auto');
 
   clone.querySelectorAll('.keyword,.marked')
        .forEach(el=>el.replaceWith(document.createTextNode(el.textContent)));
 
   clone.querySelectorAll('h1, h2, h3').forEach(el => {
-    el.style.marginTop = '24px';
-    el.style.marginBottom = '16px';
+    el.style.marginTop = '20px';
+    el.style.marginBottom = '12px';
     el.style.pageBreakAfter = 'avoid';
+    el.style.maxWidth = '100%';
+    el.style.wordWrap = 'break-word';
+    el.style.overflowWrap = 'break-word';
   });
 
-  clone.querySelectorAll('p').forEach(el => {
-    el.style.marginTop = '12px';
-    el.style.marginBottom = '12px';
+  clone.querySelectorAll('p, div, span').forEach(el => {
+    el.style.marginTop = '8px';
+    el.style.marginBottom = '8px';
     el.style.pageBreakInside = 'avoid';
+    el.style.maxWidth = '100%';
+    el.style.wordWrap = 'break-word';
+    el.style.overflowWrap = 'break-word';
+    el.style.whiteSpace = 'normal';
+  });
+
+  clone.querySelectorAll('table').forEach(el => {
+    el.style.width = '100%';
+    el.style.maxWidth = '100%';
+    el.style.tableLayout = 'fixed';
+    el.style.wordWrap = 'break-word';
+  });
+
+  clone.querySelectorAll('td, th').forEach(el => {
+    el.style.wordWrap = 'break-word';
+    el.style.overflowWrap = 'break-word';
+    el.style.maxWidth = '200px';
   });
 
   document.body.appendChild(clone);
   const pdf=new jsPDF({unit:'pt',format:'a4'});
   await pdf.html(clone,{
     margin,
-    autoPaging:'slice',
+    autoPaging:'text',
     html2canvas:{
-      scale:1.0,
+      scale:0.75,
       useCORS:true,
       backgroundColor:'#ffffff',
       letterRendering:true,
       allowTaint:false,
-      height:window.innerHeight,
-      width:window.innerWidth,
+      width:contentWidth,
+      height:800,
       scrollX:0,
       scrollY:0
     }
