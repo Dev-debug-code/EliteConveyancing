@@ -654,13 +654,13 @@ function highlightBySlice(start,end){
   const slice = rawText.slice(start,end).replace(/\s+/g,' ').trim();
   console.log(`highlightBySlice: extracted slice "${slice}" from positions ${start}-${end}`);
   
-  if(slice.length < 3) {
+  if(slice.length < 2) {
     console.warn(`highlightBySlice: slice too short (${slice.length} chars): "${slice}"`);
     return false;       
   }
 
-  if (!/[£\d\/\-]/.test(slice)) {
-    console.warn(`highlightBySlice: slice doesn't contain expected patterns: "${slice}"`);
+  if (slice.length < 3 && !/[£\d\/\-]/.test(slice)) {
+    console.warn(`highlightBySlice: short slice doesn't contain expected patterns: "${slice}"`);
     return false;
   }
 
@@ -685,26 +685,53 @@ function highlightSlice(start,end){
 
 async function downloadReportPDF(){
   const { jsPDF } = window.jspdf;
-  const margin=40;
+  const margin=60;
 
   const src=document.getElementById('report');
   const clone=src.cloneNode(true);
   clone.removeAttribute('style');
-  clone.style.width='800px';
-  clone.style.lineHeight='1.6';
+  clone.style.width='750px';
+  clone.style.maxWidth='750px';
+  clone.style.lineHeight='1.8';
   clone.style.wordWrap='break-word';
   clone.style.overflowWrap='break-word';
+  clone.style.fontSize='14px';
+  clone.style.fontFamily='Arial, sans-serif';
+  clone.style.padding='20px';
+  clone.style.boxSizing='border-box';
   clone.classList.remove('overflow-auto');
 
   clone.querySelectorAll('.keyword,.marked')
        .forEach(el=>el.replaceWith(document.createTextNode(el.textContent)));
 
+  clone.querySelectorAll('h1, h2, h3').forEach(el => {
+    el.style.marginTop = '24px';
+    el.style.marginBottom = '16px';
+    el.style.pageBreakAfter = 'avoid';
+  });
+
+  clone.querySelectorAll('p').forEach(el => {
+    el.style.marginTop = '12px';
+    el.style.marginBottom = '12px';
+    el.style.pageBreakInside = 'avoid';
+  });
+
   document.body.appendChild(clone);
   const pdf=new jsPDF({unit:'pt',format:'a4'});
   await pdf.html(clone,{
     margin,
-    autoPaging:'text',
-    html2canvas:{scale:0.8,useCORS:true,backgroundColor:'#ffffff',letterRendering:true}
+    autoPaging:'slice',
+    html2canvas:{
+      scale:1.0,
+      useCORS:true,
+      backgroundColor:'#ffffff',
+      letterRendering:true,
+      allowTaint:false,
+      height:window.innerHeight,
+      width:window.innerWidth,
+      scrollX:0,
+      scrollY:0
+    }
   });
   document.body.removeChild(clone);
   pdf.save('Mortgage_Report.pdf');
