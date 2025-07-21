@@ -5,7 +5,7 @@ const placeholderMap = {
   "[LENDER]"                 : "lender",
   "[INITIAL_AMOUNT]"         : "initial_amount",
   "[COST_ONCE]"              : "other_costs",
-  "[COST_RECURRING]"         : "other_costs",
+  "[NET_ADVANCE]"            : "net_advance",
   "[TERM]"                   : "term",
   "[EARLY_REPAYMENT_SECTION]": "early_repayment_section",
   "[SPECIAL_CONDITIONS]"     : "special_conditions",
@@ -21,38 +21,92 @@ let selectedFile = null;
 /*  Loading phrases for entertainment                            */
 /* ------------------------------------------------------------- */
 const loadingPhrases = [
-  "Analyzing mortgage terms with AI precision...",
-  "Extracting key financial details from your document...",
-  "Cross-referencing lender requirements...",
-  "Identifying potential red flags and opportunities...",
-  "Calculating repayment scenarios and projections...",
-  "Reviewing special conditions and clauses...",
-  "Generating comprehensive risk assessment...",
-  "Comparing against industry standards...",
-  "Finalizing your personalized mortgage report..."
+  "Analyzing mortgage offer structure...",
+  "Scanning for lender details...",
+  "Identifying key financial figures...",
+  "Reading mortgage terms and conditions...",
+  "Extracting loan amount information...",
+  "Processing document layout...",
+  "Locating special conditions section...",
+  "Parsing repayment details...",
+  "Finding expiry date information...",
+  "Calculating net amount values...",
+  "Detecting lender letterhead...",
+  "Mapping document sections...",
+  "Identifying early repayment clauses...",
+  "Analyzing interest rate details...",
+  "Extracting mortgage term length...",
+  "Reading additional cost breakdowns...",
+  "Verifying lender name format...",
+  "Scanning for hidden fees...",
+  "Processing offer validity dates...",
+  "Detecting special condition markers...",
+  "Analyzing repayment structures...",
+  "Finding section numbers...",
+  "Extracting initial advance amount...",
+  "Reading completion requirements...",
+  "Identifying mortgage type...",
+  "Processing legal stipulations...",
+  "Scanning financial summaries...",
+  "Validating document authenticity...",
+  "Extracting key dates...",
+  "Reading lender requirements..."
+];
+
+const eliteLoadingPhrases = [
+  "Applying Elite extraction sequence...",
+  "Checking against Elite data...",
+  "Formatting for Elite systems...",
+  "Matching Elite lender codes...",
+  "Filtering per Elite rules...",
+  "Cross-checking Elite compliance...",
+  "Populating Elite case fields...",
+  "Preparing Elite summary format...",
+  "Validating Elite requirements...",
+  "Building Elite Conveyancing report..."
 ];
 
 let phraseInterval;
 
 function startLoadingPhrases() {
   let currentPhraseIndex = 0;
+  let startTime = Date.now();
+  let usingElitePhases = false;
   const phraseElement = $('#loadingPhrase');
   
   phraseElement.text(loadingPhrases[currentPhraseIndex]).css('opacity', 1);
   
-  phraseInterval = setInterval(() => {
+  function updatePhrase() {
+    const elapsed = Date.now() - startTime;
+    
+    if (elapsed > 30000 && !usingElitePhases) {
+      usingElitePhases = true;
+      currentPhraseIndex = 0;
+    }
+    
+    const phrases = usingElitePhases ? eliteLoadingPhrases : loadingPhrases;
+    
     phraseElement.css('opacity', 0);
     
     setTimeout(() => {
-      currentPhraseIndex = (currentPhraseIndex + 1) % loadingPhrases.length;
-      phraseElement.text(loadingPhrases[currentPhraseIndex]).css('opacity', 1);
+      currentPhraseIndex = (currentPhraseIndex + 1) % phrases.length;
+      phraseElement.text(phrases[currentPhraseIndex]).css('opacity', 1);
     }, 500); // Wait for fade out to complete
-  }, 3000); // Change phrase every 3 seconds
+    
+    const minInterval = usingElitePhases ? 10000 : 5000;
+    const maxInterval = usingElitePhases ? 20000 : 10000;
+    const randomInterval = Math.random() * (maxInterval - minInterval) + minInterval;
+    
+    phraseInterval = setTimeout(updatePhrase, randomInterval);
+  }
+  
+  const initialInterval = Math.random() * 5000 + 5000; // 5-10 seconds
+  phraseInterval = setTimeout(updatePhrase, initialInterval);
 }
 
 function stopLoadingPhrases() {
   if (phraseInterval) {
-    clearInterval(phraseInterval);
+    clearTimeout(phraseInterval);
     phraseInterval = null;
   }
   $('#loadingPhrase').css('opacity', 0);
@@ -202,11 +256,27 @@ async function loadAssets(){
       initial_amount: apiData.initial_amount,
       early_repayment_section: apiData.early_repayment_section,
       other_costs: apiData.other_costs,
+      net_advance: apiData.net_advance,
       expiry_date: apiData.expiry_date,
       special_conditions: apiData.special_conditions
     };
     console.log('Processed keyData:', JSON.stringify(keyData, null, 2));
     console.log('Non-empty fields:', Object.entries(keyData).filter(([k,v]) => v?.value).map(([k,v]) => `${k}: ${v.value}`));
+    
+    console.log('=== DEBUGGING START/END POSITIONS ===');
+    for (const [key, data] of Object.entries(keyData)) {
+      if (data && data.positions && data.positions.start !== undefined && data.positions.end !== undefined) {
+        const extractedText = rawText.slice(data.positions.start, data.positions.end);
+        console.log(`${key}:`);
+        console.log(`  API value: "${data.value}"`);
+        console.log(`  Positions: ${data.positions.start}-${data.positions.end}`);
+        console.log(`  Extracted text: "${extractedText}"`);
+        console.log(`  Match: ${extractedText === data.value ? 'YES' : 'NO'}`);
+        console.log('---');
+      } else if (data && data.value) {
+        console.log(`${key}: No position data available (API value: "${data.value}")`);
+      }
+    }
     
     const tplResponse = await fetch('data/mortgage_report_template.html');
     reportTemplate = await tplResponse.text();
@@ -243,47 +313,83 @@ function buildReport(tpl, keys){
     const info = keys[key];
     const v    = info;
 
+    if (key === 'other_costs') {
+      const txt = v.value;
+      
+      const sections = txt.split(/\n+/);
+      let oneOffSection = '';
+      let recurringSection = '';
+      
+      const recurringIndex = sections.findIndex(section => 
+        section.toLowerCase().includes('recurring costs')
+      );
+      
+      if (recurringIndex > 0) {
+        oneOffSection = sections.slice(0, recurringIndex).join('\n').trim();
+        recurringSection = sections.slice(recurringIndex).join('\n').trim();
+      } else {
+        const doubleSplit = txt.split('\n\n');
+        if (doubleSplit.length >= 2) {
+          oneOffSection = doubleSplit[0].trim();
+          recurringSection = doubleSplit[1].trim();
+        } else {
+          oneOffSection = txt.trim();
+          recurringSection = 'Recurring costs: None';
+        }
+      }
+      
+      let oneOffCosts = oneOffSection;
+      if (oneOffSection.toLowerCase().includes('one-off costs:') || oneOffSection.toLowerCase().includes('one off costs:')) {
+        const match = oneOffSection.match(/one[-\s]*off\s*costs:\s*(.*)/i);
+        if (match) {
+          oneOffCosts = match[1].trim();
+        }
+      }
+      
+      const costItems = oneOffCosts.split(',').map(item => item.trim()).filter(Boolean);
+      const formattedOneOff = costItems.length > 0 ? 
+        `One-off costs: ${costItems.join(', ')}` : 
+        `One-off costs: ${oneOffCosts}`;
+      
+      let recurringValue = recurringSection;
+      if (recurringSection.toLowerCase().includes('recurring costs:')) {
+        const match = recurringSection.match(/recurring\s*costs:\s*(.*)/i);
+        if (match) {
+          recurringValue = match[1].trim();
+        }
+      }
+      const formattedRecurring = `Recurring costs: ${recurringValue}`;
+      
+      const clsOne = info.confidence?.one_off_costs === 1 ? 'conf-high'
+                    : info.confidence?.one_off_costs === 0 ? 'conf-low' : 'conf-mid';
+      const clsRec = info.confidence?.recurring_costs === 1 ? 'conf-high'
+                    : info.confidence?.recurring_costs === 0 ? 'conf-low' : 'conf-mid';
 
-if (key === 'other_costs') {
-   const txt     = v.value;                                  
-   const feeNum  = (txt.match(/£[\d,]+\.\d{2}/) || [''])[0]; 
-   const feeDisp = `Product fee: ${feeNum || '?'}`;
-   const recur   = txt.match(/Recurring costs:[^\n]*/i)?.[0]
-                   || 'Recurring costs: None';
-
-   const recurVal = recur.replace(/^Recurring costs:\s*/i,'').trim();
-
-   const clsOne  = info.confidence?.one_off_costs === 1 ? 'conf-high'
-                  : info.confidence?.one_off_costs === 0 ? 'conf-low' : 'conf-mid';
-   const clsRec  = info.confidence?.recurring_costs === 1 ? 'conf-high'
-                  : info.confidence?.recurring_costs === 0 ? 'conf-low' : 'conf-mid';
-
-   html = html.replaceAll(ph, `
-     <span class="keyword ${clsOne}"
-           data-search="${feeNum}"
-           data-start="${v.start?.one_off_costs || 0}"
-           data-end="${v.end?.one_off_costs || 0}">
-       ${esc(feeDisp)}
-     </span><br>
-     <span class="keyword ${clsRec}"
-           data-search="${recurVal || 'None'}"
-           data-start="${v.start?.recurring_costs || 0}"
-           data-end="${v.end?.recurring_costs || 0}">
-       ${esc(recur)}
-     </span>
-   `);
-   continue;
-}
-
-
+      html = html.replaceAll(ph, `
+        <span class="keyword ${clsOne}"
+              data-search="${esc(oneOffCosts)}"
+              data-start="${v.start?.one_off_costs || 0}"
+              data-end="${v.end?.one_off_costs || 0}">
+          ${esc(formattedOneOff)}
+        </span><br>
+        <span class="keyword ${clsRec}"
+              data-search="${esc(recurringValue)}"
+              data-start="${v.start?.recurring_costs || 0}"
+              data-end="${v.end?.recurring_costs || 0}">
+          ${esc(formattedRecurring)}
+        </span>
+      `);
+      continue;
+    }
 
     let display='', search='';
 
     if(key==='early_repayment_section'){
-      display = String(v.value);       
-      search  = 'Section ' + display;               
+      display = `"${String(v.value)}"`;       
+      const sectionNum = String(v.value);
+      search = sectionNum;
 
-    } else if (key === 'expiry_date') {
+    }else if (key === 'expiry_date') {
       display = String(v.value);                 
 
       const [d,m,y] = display.split('/');
@@ -291,8 +397,17 @@ if (key === 'other_costs') {
                           'July','August','September','October','November','December'];
       const longFmt = (d && m && y) ? `${Number(d)} ${monthNames[Number(m)-1]} ${y}` : '';
 
-      const parts = [longFmt, display].filter(Boolean);  
-      search      = parts.join('|');                                     
+      const parts = [longFmt, display];
+      if (d && m && y) {
+        parts.push(`${d}/${m}/${y}`);
+        parts.push(`${Number(d)}/${Number(m)}/${y}`);
+        parts.push(`${d.padStart(2,'0')}/${m.padStart(2,'0')}/${y}`);
+        if (longFmt) {
+          parts.push(longFmt.replace(/\s+/g, '\\s+'));
+        }
+      }
+      const filteredParts = parts.filter(Boolean);
+      search = filteredParts.join('|');                                     
     } else if(typeof v.value==='object' && 'product_fee' in v.value){
       display=`£${Number(v.value.product_fee).toLocaleString('en-GB',{minimumFractionDigits:2})}`;
       search = display.replace(/[^0-9]/g,'');
@@ -301,7 +416,22 @@ if (key === 'other_costs') {
       display=JSON.stringify(v.value); search=display;
 
     } else {
-      display=String(v.value); search=display;
+      display=String(v.value); 
+      search=display;
+      
+      if (/£[\d,]+\.?\d*/.test(display)) {
+        const amount = display.replace(/[£,]/g, '');
+        const patterns = [
+          display,                    // Original: £139,688.00
+          display.replace(/,/g, ''),  // No commas: £139688.00
+          display.replace(/\s+/g, '\\s+'), // Handle spacing variations
+          amount,                     // Just numbers: 139688.00
+          amount.replace(/\.00$/, ''), // No decimal: 139688
+          display.replace(/£/g, '\\£'), // Escaped pound sign
+          display.replace(/,/g, '').replace(/\s+/g, '\\s+') // No commas + spacing
+        ];
+        search = patterns.filter((p, i, arr) => arr.indexOf(p) === i).join('|'); // Remove duplicates
+      }
     }
 
     const cls = info.confidence===1 ? 'conf-high'
@@ -339,6 +469,15 @@ function bindClicks(){
   $('#report').off('click', '.keyword').on('click', '.keyword', function(){
     const {search,start,end}=this.dataset;
     
+    console.log(`=== KEYWORD CLICK DEBUG ===`);
+    console.log(`Keyword clicked: "${$(this).text()}"`);
+    console.log(`Search patterns: "${search}"`);
+    console.log(`Position range: ${start}-${end}`);
+    
+    if (search) {
+      debugHighlighting(search);
+    }
+    
     if(start && end && +start > 0 && +end > 0) {
       console.log(`Trying position-based highlighting: ${start}-${end}`);
       if(highlightBySlice(+start,+end)) return;
@@ -362,23 +501,124 @@ function highlightExact(txt){
   mk.unmark();                                
 
   const alts = txt.split('|').map(s => s.trim()).filter(Boolean);
+  console.log('highlightExact: trying alternatives:', alts);
 
   for (const alt of alts){
-    const re = new RegExp(
-        escapeReg(alt).replace(/\s+/g,'[\\s\\u00a0]+'),
-        'i'
-    );
-    mk.markRegExp(re, {
+    console.log(`highlightExact: trying pattern "${alt}"`);
+    
+    if (/^\d+\.\s*Early\s*repayment/i.test(alt)) {
+      console.log('highlightExact: handling numbered section converted to list');
+      const $listItems = $box.find('li');
+      console.log(`highlightExact: found ${$listItems.length} list items`);
+      let found = false;
+      $listItems.each(function(index) {
+        const itemText = $(this).text().trim();
+        console.log(`highlightExact: checking list item ${index}: "${itemText.substring(0, 50)}..."`);
+        if (/Early\s*repayment/i.test(itemText)) {
+          console.log(`highlightExact: found "Early repayment" in list item ${index}: "${itemText}"`);
+          
+          const $listItem = $(this);
+          const $paragraph = $listItem.find('p');
+          if ($paragraph.length > 0) {
+            console.log(`highlightExact: highlighting text inside paragraph`);
+            const html = $paragraph.html();
+            const highlightedHtml = html.replace(/(Early\s*repayment)/i, '<span class="marked">$1</span>');
+            $paragraph.html(highlightedHtml);
+          } else {
+            console.log(`highlightExact: no paragraph found, adding marked class to list item`);
+            $listItem.addClass('marked');
+          }
+          
+          found = true;
+          return false; // break
+        }
+      });
+      
+      if (found) {
+        scrollToMark($box);
+        console.log(`highlightExact: successfully highlighted numbered section "${alt}"`);
+        return true;
+      } else {
+        console.log('highlightExact: no list items found containing "Early repayment"');
+      }
+    }
+    
+    console.log(`highlightExact: checking if "${alt}" matches /8\\.\\s*Early\\s*repayment/i`);
+    if (/8\.\s*Early\s*repayment/i.test(alt)) {
+      console.log('highlightExact: trying direct list item search for Early repayment');
+      const $listItems = $box.find('li');
+      let found = false;
+      $listItems.each(function(index) {
+        const itemText = $(this).text().trim();
+        if (/Early\s*repayment/i.test(itemText)) {
+          console.log(`highlightExact: found "Early repayment" in list item ${index}: "${itemText.substring(0, 50)}..."`);
+          
+          const $listItem = $(this);
+          const $paragraph = $listItem.find('p');
+          if ($paragraph.length > 0) {
+            console.log(`highlightExact: highlighting text inside paragraph element`);
+            const html = $paragraph.html();
+            const highlightedHtml = html.replace(/(Early\s*repayment)/gi, '<span class="marked">$1</span>');
+            $paragraph.html(highlightedHtml);
+            found = true;
+          } else {
+            console.log(`highlightExact: no paragraph found, highlighting directly in list item`);
+            const html = $listItem.html();
+            const highlightedHtml = html.replace(/(Early\s*repayment)/gi, '<span class="marked">$1</span>');
+            $listItem.html(highlightedHtml);
+            found = true;
+          }
+          
+          return false; // break
+        }
+      });
+      
+      if (found) {
+        scrollToMark($box);
+        console.log(`highlightExact: successfully highlighted "Early repayment" in list item`);
+        return true;
+      }
+    }
+    
+    mk.mark(alt, {
       element:'span',
       className:'marked',
-      acrossElements:true,
+      accuracy: 'exactly',
       separateWordSearch:false
     });
 
     let $hits = $box.find('.marked');
+    console.log(`highlightExact: found ${$hits.length} matches for "${alt}"`);
+    
     if (!$hits.length){
-      mk.unmark();                              
-      continue;
+      mk.unmark();
+      
+      console.log(`highlightExact: mark.js failed, trying manual highlighting for "${alt}"`);
+      const boxText = $box.text();
+      const altLower = alt.toLowerCase();
+      const boxTextLower = boxText.toLowerCase();
+      
+      if (boxTextLower.includes(altLower)) {
+        console.log(`highlightExact: found "${alt}" in text, applying manual highlighting`);
+        const regex = new RegExp(escapeReg(alt), 'gi');
+        
+        $box.find('*').addBack().contents().filter(function() {
+          return this.nodeType === 3; // Text nodes only
+        }).each(function() {
+          const text = this.textContent;
+          if (regex.test(text)) {
+            const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
+            $(this).replaceWith(highlightedText);
+          }
+        });
+        
+        $hits = $box.find('.marked');
+        console.log(`highlightExact: manual highlighting created ${$hits.length} matches`);
+      }
+      
+      if (!$hits.length) {
+        continue;
+      }
     }
 
     const wantRe =
@@ -387,6 +627,7 @@ function highlightExact(txt){
         null;
 
     if (wantRe && $hits.length > 1){
+      console.log('highlightExact: filtering hits with context filter');
       $hits = $hits.filter((_,el) => wantRe.test(el.parentNode.innerText));
       if (!$hits.length) $hits = $box.find('.marked');        
     }
@@ -395,10 +636,11 @@ function highlightExact(txt){
     $box.find('.marked').not($target).removeClass('marked');
 
     scrollToMark($box);
+    console.log(`highlightExact: successfully highlighted "${alt}"`);
     return true;                                    
   }
 
-  console.warn('highlightExact failed for:', txt);
+  console.warn('highlightExact failed for all alternatives:', alts);
   dbgMark(txt);                                    
   return false;
 }
@@ -410,9 +652,19 @@ function highlightBySlice(start,end){
   if(!Number.isFinite(start)||!Number.isFinite(end)) return false;
 
   const slice = rawText.slice(start,end).replace(/\s+/g,' ').trim();
-  if(slice.length < 3) return false;       
+  console.log(`highlightBySlice: extracted slice "${slice}" from positions ${start}-${end}`);
+  
+  if(slice.length < 3) {
+    console.warn(`highlightBySlice: slice too short (${slice.length} chars): "${slice}"`);
+    return false;       
+  }
 
-  return highlightExact(escapeReg(slice));
+  if (!/[£\d\/\-]/.test(slice)) {
+    console.warn(`highlightBySlice: slice doesn't contain expected patterns: "${slice}"`);
+    return false;
+  }
+
+  return highlightExact(slice);
 }
 
 
@@ -439,6 +691,9 @@ async function downloadReportPDF(){
   const clone=src.cloneNode(true);
   clone.removeAttribute('style');
   clone.style.width='800px';
+  clone.style.lineHeight='1.6';
+  clone.style.wordWrap='break-word';
+  clone.style.overflowWrap='break-word';
   clone.classList.remove('overflow-auto');
 
   clone.querySelectorAll('.keyword,.marked')
@@ -449,7 +704,7 @@ async function downloadReportPDF(){
   await pdf.html(clone,{
     margin,
     autoPaging:'text',
-    html2canvas:{scale:1,useCORS:true,backgroundColor:'#ffffff'}
+    html2canvas:{scale:0.8,useCORS:true,backgroundColor:'#ffffff',letterRendering:true}
   });
   document.body.removeChild(clone);
   pdf.save('Mortgage_Report.pdf');
@@ -465,15 +720,70 @@ function esc(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;
 
 function debugSlices() {
   if (!rawText || !keyData) {
-    console.warn('rawText / keyData not loaded yet – upload a PDF first.');
+    console.log('No data available for debugging');
     return;
   }
-  console.log('──────────────── slice inspector ────────────────');
-  for (const [k, info] of Object.entries(keyData)) {
-    (info.values || []).forEach((v, i) => {
-      const slice = rawText.slice(v.start, v.end).replace(/\s+/g, ' ').trim();
-      console.log(`${k}[${i}] →`, `"${slice}"`);
-    });
+  
+  console.log('=== DEBUG SLICES ===');
+  for (const [key, data] of Object.entries(keyData)) {
+    if (data?.start && data?.end) {
+      const slice = rawText.slice(data.start, data.end);
+      console.log(`${key}: "${slice}" (${data.start}-${data.end})`);
+    }
   }
-  console.log('──────────────────────────────────────────────────');
+}
+
+function debugHighlighting(searchText) {
+  console.log('=== DEBUG HIGHLIGHTING ===');
+  console.log('Search text:', searchText);
+  console.log('Raw text length:', rawText ? rawText.length : 'No rawText');
+  
+  if (!rawText) {
+    console.log('No rawText available for debugging');
+    return;
+  }
+  
+  const alternatives = searchText.split('|');
+  for (const alt of alternatives) {
+    const found = rawText.toLowerCase().includes(alt.toLowerCase());
+    console.log(`"${alt}" found in rawText:`, found);
+    
+    if (found) {
+      const index = rawText.toLowerCase().indexOf(alt.toLowerCase());
+      const context = rawText.slice(Math.max(0, index - 50), index + alt.length + 50);
+      console.log(`Context around "${alt}":`, context);
+    }
+    
+    const $box = $('#renderedText');
+    const htmlText = $box.text();
+    const foundInHtml = htmlText.toLowerCase().includes(alt.toLowerCase());
+    console.log(`"${alt}" found in rendered HTML:`, foundInHtml);
+    
+    if (foundInHtml) {
+      const htmlIndex = htmlText.toLowerCase().indexOf(alt.toLowerCase());
+      const htmlContext = htmlText.slice(Math.max(0, htmlIndex - 50), htmlIndex + alt.length + 50);
+      console.log(`HTML context around "${alt}":`, htmlContext);
+    }
+  }
+  
+  for (const alt of alternatives) {
+    try {
+      let pattern = escapeReg(alt);
+      if (alt.includes('Early repayment')) {
+        pattern = pattern.replace(/Early\s+repayment/i, 'Early[\\s\\u00a0]+repayment');
+      }
+      pattern = pattern.replace(/\s+/g,'[\\s\\u00a0]+');
+      const re = new RegExp(pattern, 'i');
+      console.log(`Regex for "${alt}":`, re);
+      
+      const matches = rawText.match(re);
+      console.log(`Regex matches for "${alt}":`, matches ? matches.length : 0);
+      
+      const $box = $('#renderedText');
+      const htmlMatches = $box.text().match(re);
+      console.log(`HTML regex matches for "${alt}":`, htmlMatches ? htmlMatches.length : 0);
+    } catch (e) {
+      console.error(`Error creating regex for "${alt}":`, e);
+    }
+  }
 }
