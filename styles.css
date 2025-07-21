@@ -125,7 +125,7 @@ body,
    margin-top: 1rem;
 }
 
-#hero{min-height:80vh;}
+#hero{min-height:75vh;}
 
 /* ------------------------------------------------------------------
    10. iPhone app styling
@@ -184,8 +184,8 @@ body {
 
 /* Updated navbar styling for new layout */
 .navbar {
-  min-height: 120px !important;
-  padding-bottom: 1rem !important;
+  min-height: 100px !important;
+  padding-bottom: 0.5rem !important;
   border-bottom: 1px solid var(--primary-green) !important;
   background-color: var(--primary-green-light) !important;
   position: relative !important;
@@ -193,9 +193,8 @@ body {
 
 /* Fix download button positioning */
 #downloadBtn {
-  position: absolute !important;
   right: 1rem !important;
-  bottom: -4rem !important;
+  bottom: -1rem !important;
   z-index: 1070 !important;
 }
 
