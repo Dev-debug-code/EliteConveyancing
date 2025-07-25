@@ -215,6 +215,37 @@ async function startAnalytics(){
   }
 }
 
+function transformApiField(apiField) {
+  if (!apiField) {
+    return null;
+  }
+  
+  if (apiField.value !== undefined) {
+    return {
+      value: apiField.value,
+      confidence: apiField.confidence || 1,
+      positions: {
+        start: apiField.positions ? apiField.positions.start : apiField.start,
+        end: apiField.positions ? apiField.positions.end : apiField.end
+      }
+    };
+  }
+  
+  if (apiField.values && apiField.values.length > 0) {
+    const firstValue = apiField.values[0];
+    return {
+      value: firstValue.value,
+      confidence: apiField.confidence || firstValue.confidence || 1,
+      positions: {
+        start: firstValue.start,
+        end: firstValue.end
+      }
+    };
+  }
+  
+  return null;
+}
+
 async function loadAssets(){
   if(rawText && keyData && reportTemplate) return;
   
@@ -223,18 +254,17 @@ async function loadAssets(){
   }
 
   try {
-    const base64 = await convertFileToBase64(selectedFile);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('stages_to_run', '[1, 2]');
     
-    const response = await fetch('https://mortgage-api-229824289274.europe-west2.run.app/process', {
+    const queryParams = new URLSearchParams({
+      json_data: JSON.stringify({"mode": "form"})
+    });
+    
+    const response = await fetch(`https://mortgage-api-229824289274.europe-west2.run.app/process_MO?${queryParams}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        pdf_base64: base64,
-        stages_to_run: [1, 2],
-        enable_llm: true
-      })
+      body: formData
     });
 
     if (!response.ok) {
@@ -242,23 +272,22 @@ async function loadAssets(){
     }
 
     const apiData = await response.json();
-    console.log('Full API response:', JSON.stringify(apiData, null, 2));
-    console.log('API processing metadata:', apiData.processing_metadata);
-    console.log('Field sources:', apiData.field_sources);
+    console.log('=== FULL API RESPONSE (shown once) ===');
+    console.log(JSON.stringify(apiData, null, 2));
     
     rawText = apiData.extracted_text || '';
     console.log('Extracted text length:', rawText ? rawText.length : 'undefined/empty');
     console.log('Extracted text preview:', rawText ? rawText.substring(0, 200) + '...' : 'No text');
     
     keyData = {
-      lender: apiData.lender,
-      term: apiData.term,
-      initial_amount: apiData.initial_amount,
-      early_repayment_section: apiData.early_repayment_section,
-      other_costs: apiData.other_costs,
-      net_advance: apiData.net_advance,
-      expiry_date: apiData.expiry_date,
-      special_conditions: apiData.special_conditions
+      lender: transformApiField(apiData.lender),
+      term: transformApiField(apiData.term),
+      initial_amount: transformApiField(apiData.initial_amount),
+      early_repayment_section: transformApiField(apiData.early_repayment_section),
+      other_costs: transformApiField(apiData.other_costs),
+      net_advance: transformApiField(apiData.net_advance),
+      expiry_date: transformApiField(apiData.expiry_date),
+      special_conditions: transformApiField(apiData.special_conditions)
     };
     console.log('Processed keyData:', JSON.stringify(keyData, null, 2));
     console.log('Non-empty fields:', Object.entries(keyData).filter(([k,v]) => v?.value).map(([k,v]) => `${k}: ${v.value}`));
@@ -368,14 +397,18 @@ function buildReport(tpl, keys){
       html = html.replaceAll(ph, `
         <span class="keyword ${clsOne}"
               data-search="${esc(oneOffCosts)}"
-              data-start="${v.start?.one_off_costs || 0}"
-              data-end="${v.end?.one_off_costs || 0}">
+              data-source-text="${esc(oneOffCosts)}"
+              data-display-text="${esc(formattedOneOff)}"
+              data-start="${v.positions?.start?.one_off_costs || 0}"
+              data-end="${v.positions?.end?.one_off_costs || 0}">
           ${esc(formattedOneOff)}
         </span><br>
         <span class="keyword ${clsRec}"
               data-search="${esc(recurringValue)}"
-              data-start="${v.start?.recurring_costs || 0}"
-              data-end="${v.end?.recurring_costs || 0}">
+              data-source-text="${esc(recurringValue)}"
+              data-display-text="${esc(formattedRecurring)}"
+              data-start="${v.positions?.start?.recurring_costs || 0}"
+              data-end="${v.positions?.end?.recurring_costs || 0}">
           ${esc(formattedRecurring)}
         </span>
       `);
@@ -415,6 +448,10 @@ function buildReport(tpl, keys){
     } else if(typeof v.value==='object'){
       display=JSON.stringify(v.value); search=display;
 
+    } else if (key === 'special_conditions') {
+      display = String(v.value).replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+      search = String(v.value).replace(/\\n/g, '\n').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+
     } else {
       display=String(v.value); 
       search=display;
@@ -437,12 +474,16 @@ function buildReport(tpl, keys){
     const cls = info.confidence===1 ? 'conf-high'
               : info.confidence===0 ? 'conf-low' : 'conf-mid';
 
+    const displayContent = key === 'special_conditions' ? display : esc(display);
+
     html = html.replaceAll(
       ph,
       `<span class="keyword ${cls}"
              data-search="${esc(search)}"
+             data-source-text="${esc(info.value || search)}"
+             data-display-text="${esc(displayContent)}"
              data-start="${v.positions?.start || 0}" data-end="${v.positions?.end || 0}">
-         ${esc(display)}
+         ${displayContent}
        </span>`
     );
   }
@@ -467,34 +508,68 @@ function dbgMark(pat){
 function bindClicks(){
   $('#renderedText').show();
   $('#report').off('click', '.keyword').on('click', '.keyword', function(){
-    const {search,start,end}=this.dataset;
+    const {search, start, end} = this.dataset;
+    const sourceText = this.dataset.sourceText;
+    const displayText = this.dataset.displayText;
     
     console.log(`=== KEYWORD CLICK DEBUG ===`);
     console.log(`Keyword clicked: "${$(this).text()}"`);
     console.log(`Search patterns: "${search}"`);
+    console.log(`Source text: "${sourceText}"`);
+    console.log(`Display text: "${displayText}"`);
     console.log(`Position range: ${start}-${end}`);
+    console.log('Raw text available:', !!rawText);
+    console.log('Raw text length:', rawText ? (rawText.textContent ? rawText.textContent.length : rawText.length) : 'N/A');
+    
+    if (!rawText || (!rawText.textContent && !rawText.length)) {
+      console.error('Cannot highlight: No raw text available. This may indicate PDF extraction failed.');
+      alert('Highlighting unavailable: PDF text extraction failed. This document may have structural issues.');
+      return;
+    }
     
     if (search) {
       debugHighlighting(search);
     }
     
-    if(start && end && +start > 0 && +end > 0) {
+    if(start && end && +start > 0 && +end > 0 && +end > +start) {
       console.log(`Trying position-based highlighting: ${start}-${end}`);
-      if(highlightBySlice(+start,+end)) return;
+      const success = highlightBySlice(+start, +end);
+      if(success) {
+        console.log(`✓ Position-based highlighting succeeded`);
+        return;
+      } else {
+        console.log(`❌ Position-based highlighting failed`);
+      }
     }
     
-    if(search && highlightExact(search)) {
-      console.log(`Used string matching fallback for: ${search}`);
+    if(sourceText && sourceText !== 'undefined' && highlightExact(sourceText)) {
+      console.log(`✓ Source text highlighting succeeded: ${sourceText}`);
       return;
     }
     
-    console.warn(`Both highlighting methods failed for: ${search} (${start}-${end})`);
+    if(search && highlightExact(search)) {
+      console.log(`✓ Search pattern highlighting succeeded: ${search}`);
+      return;
+    }
+    
+    if(displayText && displayText !== search && highlightExact(displayText)) {
+      console.log(`✓ Display text highlighting succeeded: ${displayText}`);
+      return;
+    }
+    
+    console.warn(`❌ All highlighting methods failed for: "${$(this).text()}" (${start}-${end})`);
   });
 }
 
 
 function highlightExact(txt){
   if (!txt) return false;
+  
+  const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
+  if (!textContent) {
+    console.warn('highlightExact: No text content available');
+    return false;
+  }
 
   const $box = $('#renderedText');
   const mk   = new Mark($box[0]);
@@ -505,6 +580,14 @@ function highlightExact(txt){
 
   for (const alt of alts){
     console.log(`highlightExact: trying pattern "${alt}"`);
+    
+    const betterMatch = findTextInSource(alt, textContent);
+    if (betterMatch && betterMatch !== alt) {
+      console.log(`highlightExact: found better match "${betterMatch}" for "${alt}"`);
+      if (highlightExact(betterMatch)) {
+        return true;
+      }
+    }
     
     if (/^\d+\.\s*Early\s*repayment/i.test(alt)) {
       console.log('highlightExact: handling numbered section converted to list');
@@ -540,6 +623,7 @@ function highlightExact(txt){
         return true;
       } else {
         console.log('highlightExact: no list items found containing "Early repayment"');
+        continue; // Try next alternative instead of falling through
       }
     }
     
@@ -577,6 +661,9 @@ function highlightExact(txt){
         scrollToMark($box);
         console.log(`highlightExact: successfully highlighted "Early repayment" in list item`);
         return true;
+      } else {
+        console.log('highlightExact: no direct list items found containing "Early repayment"');
+        continue; // Try next alternative instead of falling through
       }
     }
     
@@ -617,30 +704,52 @@ function highlightExact(txt){
       }
       
       if (!$hits.length) {
-        continue;
+        continue; // Try next alternative
       }
     }
 
-    const wantRe =
-        /£\d/.test(alt)        && /product\s*fee/i      ||   
-        /none|£?0(\.00)?/i.test(alt) && /paid\s*regularly/i || 
-        null;
+    if ($hits.length > 0) {
+      const visibleHits = Array.from($hits).filter(hit => {
+        let parent = hit.parentElement;
+        while (parent && parent !== $box[0]) {
+          if (parent.hasAttribute('offscreen')) {
+            return false;
+          }
+          parent = parent.parentElement;
+        }
+        return true;
+      });
+      
+      console.log(`highlightExact: found ${$hits.length} total matches, ${visibleHits.length} visible matches for "${alt}"`);
+      
+      if (visibleHits.length === 0) {
+        console.log(`❌ highlightExact: no visible matches found for "${alt}" in RIGHT PANEL`);
+        $box.find('.marked').removeClass('marked'); // Clear all marks since none are visible
+        continue; // Try next alternative
+      }
+      
+      const wantRe =
+          /£\d/.test(alt)        && /product\s*fee/i      ||   
+          /none|£?0(\.00)?/i.test(alt) && /paid\s*regularly/i || 
+          null;
 
-    if (wantRe && $hits.length > 1){
-      console.log('highlightExact: filtering hits with context filter');
-      $hits = $hits.filter((_,el) => wantRe.test(el.parentNode.innerText));
-      if (!$hits.length) $hits = $box.find('.marked');        
-    }
+      let $filteredHits = $(visibleHits);
+      if (wantRe && visibleHits.length > 1){
+        console.log('highlightExact: filtering visible hits with context filter');
+        $filteredHits = $filteredHits.filter((_,el) => wantRe.test(el.parentNode.innerText));
+        if (!$filteredHits.length) $filteredHits = $(visibleHits);        
+      }
 
-    const $target = $hits.first();
-    $box.find('.marked').not($target).removeClass('marked');
+      const $target = $filteredHits.first();
+      $box.find('.marked').not($target).removeClass('marked');
 
-    scrollToMark($box);
-    console.log(`highlightExact: successfully highlighted "${alt}"`);
-    return true;                                    
+      scrollToMark($box);
+      console.log(`✓ highlightExact: successfully highlighted "${alt}" in RIGHT PANEL (report section)`);
+      return true;
+    }                                    
   }
 
-  console.warn('highlightExact failed for all alternatives:', alts);
+  console.warn('❌ highlightExact failed for all alternatives in RIGHT PANEL (report section):', alts);
   dbgMark(txt);                                    
   return false;
 }
@@ -651,35 +760,170 @@ function highlightExact(txt){
 function highlightBySlice(start,end){
   if(!Number.isFinite(start)||!Number.isFinite(end)) return false;
 
-  const slice = rawText.slice(start,end).replace(/\s+/g,' ').trim();
-  console.log(`highlightBySlice: extracted slice "${slice}" from positions ${start}-${end}`);
-  
-  if(slice.length < 2) {
-    console.warn(`highlightBySlice: slice too short (${slice.length} chars): "${slice}"`);
-    return false;       
+  const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
+  if (!textContent || textContent.length === 0) {
+    console.warn('highlightBySlice: No text content available for highlighting');
+    return false;
   }
-
-  if (slice.length < 3 && !/[£\d\/\-]/.test(slice)) {
-    console.warn(`highlightBySlice: short slice doesn't contain expected patterns: "${slice}"`);
+  
+  if (start < 0 || end > textContent.length || start >= end) {
+    console.warn(`highlightBySlice: Invalid positions ${start}-${end} for text length ${textContent.length}`);
     return false;
   }
 
-  return highlightExact(slice);
+  const slice = textContent.slice(start,end);
+  const normalizedSlice = slice.replace(/\s+/g,' ').trim();
+  
+  console.log(`📍 EXTRACTED: "${normalizedSlice}"`);
+  
+  if(normalizedSlice.length < 2) {
+    console.warn(`highlightBySlice: slice too short (${normalizedSlice.length} chars): "${normalizedSlice}"`);
+    return false;       
+  }
+
+  if (normalizedSlice.length < 3 && !/[£\d\/\-]/.test(normalizedSlice)) {
+    console.warn(`highlightBySlice: short slice doesn't contain expected patterns: "${normalizedSlice}"`);
+    return false;
+  }
+
+  console.log('highlightBySlice: using direct slice highlighting');
+  return highlightSlice(start, end);
 }
 
 
 
-function highlightSlice(start,end){
-  if(!Number.isFinite(start)||!Number.isFinite(end)) return false;
-  const $pre=$('#rawText')
-      .show()
-      .css({position:'absolute',top:0,left:0,right:0,bottom:0,background:'#fff',
-            zIndex:1050,overflow:'auto',padding:'1rem'})
-      .html(`${esc(rawText.slice(0,start))}
-             <span class="marked">${esc(rawText.slice(start,end))}</span>
-             ${esc(rawText.slice(end))}`);
-  scrollToMark($pre);
-  return true;
+function highlightSlice(start, end) {
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+  
+  const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
+  if (!textContent || textContent.length === 0) {
+    console.warn('highlightSlice: No text content available for highlighting');
+    return false;
+  }
+  
+  if (start < 0 || end > textContent.length || start >= end) {
+    console.warn(`highlightSlice: Invalid positions ${start}-${end} for text length ${textContent.length}`);
+    return false;
+  }
+
+  const slice = textContent.slice(start, end);
+  const normalizedSlice = slice.replace(/\s+/g, ' ').trim();
+  
+  if (normalizedSlice.length < 2) {
+    console.warn(`❌ Slice too short: "${normalizedSlice}"`);
+    return false;       
+  }
+
+  const result = highlightInRenderedText(normalizedSlice);
+  console.log(`🎯 MATCH: ${result ? '✅ SUCCESS' : '❌ FAILED'}`);
+  return result;
+}
+
+function highlightInRenderedText(textToHighlight) {
+  if (!textToHighlight || textToHighlight.length < 2) {
+    console.warn('highlightInRenderedText: Invalid text to highlight');
+    return false;
+  }
+
+  const $box = $('#renderedText');
+  if ($box.length === 0) {
+    console.warn('highlightInRenderedText: Rendered text container not found');
+    return false;
+  }
+
+
+  const markInstance = new Mark($box[0]);
+  markInstance.unmark(); // Clear previous highlights
+
+  let highlightSuccess = false;
+
+  // Strategy 1: Try exact match first
+  markInstance.mark(textToHighlight, {
+    accuracy: 'exactly',
+    separateWordSearch: false,
+    className: 'marked',
+    filter: function(node, term, totalCounter, counter) {
+      return counter === 1; // Only highlight the first occurrence
+    },
+    done: function(totalMarks) {
+      if (totalMarks > 0) {
+        highlightSuccess = true;
+        scrollToFirstMark($box);
+      }
+    }
+  });
+
+  if (highlightSuccess) return true;
+
+  // Strategy 2: Try partial match for longer text
+  if (textToHighlight.length > 20) {
+    markInstance.mark(textToHighlight, {
+      accuracy: 'partially',
+      separateWordSearch: false,
+      className: 'marked',
+      filter: function(node, term, totalCounter, counter) {
+        return counter === 1; // Only highlight the first occurrence
+      },
+      done: function(totalMarks) {
+        if (totalMarks > 0) {
+          highlightSuccess = true;
+          scrollToFirstMark($box);
+        }
+      }
+    });
+
+    if (highlightSuccess) return true;
+  }
+
+  // Strategy 3: Try highlighting key phrases for complex text
+  const keyPhrases = [
+    'Higher Lending Charge',
+    'Overpayments',
+    'Pre-Payment Balance', 
+    'Underpayments',
+    'Early repayment',
+    'Mortgage exit fee',
+    'Legal fee',
+    'Land registry fee',
+    'One-off costs',
+    'Recurring costs',
+    'Product fee'
+  ];
+
+  for (const phrase of keyPhrases) {
+    if (textToHighlight.toLowerCase().includes(phrase.toLowerCase())) {
+      markInstance.mark(phrase, {
+        accuracy: 'partially',
+        separateWordSearch: false,
+        className: 'marked',
+        filter: function(node, term, totalCounter, counter) {
+          return counter === 1; // Only highlight the first occurrence
+        },
+        done: function(totalMarks) {
+          if (totalMarks > 0) {
+            highlightSuccess = true;
+            scrollToFirstMark($box);
+          }
+        }
+      });
+      if (highlightSuccess) break;
+    }
+  }
+
+  if (!highlightSuccess) {
+    console.warn(`❌ All highlighting strategies failed for: "${textToHighlight.substring(0, 50)}..."`);
+  }
+
+  return highlightSuccess;
+}
+
+function scrollToFirstMark($container) {
+  const $firstMark = $container.find('mark.marked').first();
+  if ($firstMark.length > 0) {
+    const containerTop = $container.scrollTop();
+    const markTop = $firstMark.position().top;
+    $container.scrollTop(containerTop + markTop - 120); // 120px padding from top
+  }
 }
 
 
@@ -768,7 +1012,45 @@ function scrollToMark($c){ const $m=$c.find('.marked').first();
 function escapeReg(s){ return s.replace(/[.*+?^${}()|[\]\\\/]/g,'\\$&'); }
 function esc(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+function normalizeTextForMatching(text) {
+  if (!text) return '';
+  return text
+    .replace(/\s+/g, ' ')  // Normalize whitespace
+    .replace(/[""'']/g, '"')  // Normalize quotes
+    .replace(/[–—]/g, '-')  // Normalize dashes
+    .replace(/£(\d+)\.(\d+)/g, '£$1.$2')  // Normalize currency
+    .replace(/\u00a0/g, ' ')  // Replace non-breaking spaces
+    .replace(/[•·]/g, '-')  // Normalize bullet points
+    .replace(/\n\s*-/g, ' -')  // Normalize line breaks before dashes
+    .replace(/\n+/g, ' ')  // Replace line breaks with spaces
+    .trim();
+}
 
+function findTextInSource(displayText, rawText) {
+  if (!displayText || !rawText) return null;
+  
+  const normalized = normalizeTextForMatching(displayText);
+  const normalizedRaw = normalizeTextForMatching(rawText);
+  
+  if (normalizedRaw.includes(normalized)) {
+    return normalized;
+  }
+  
+  const chunks = normalized.split(/[,;:]/).map(chunk => chunk.trim()).filter(Boolean);
+  for (const chunk of chunks) {
+    if (chunk.length > 10 && normalizedRaw.includes(chunk)) {
+      return chunk;
+    }
+  }
+  
+  const words = normalized.split(/\s+/).filter(word => word.length > 3);
+  const foundWords = words.filter(word => normalizedRaw.includes(word));
+  if (foundWords.length >= Math.min(3, words.length * 0.6)) {
+    return normalized;
+  }
+  
+  return null;
+}
 
 function debugSlices() {
   if (!rawText || !keyData) {
@@ -788,21 +1070,23 @@ function debugSlices() {
 function debugHighlighting(searchText) {
   console.log('=== DEBUG HIGHLIGHTING ===');
   console.log('Search text:', searchText);
-  console.log('Raw text length:', rawText ? rawText.length : 'No rawText');
   
-  if (!rawText) {
-    console.log('No rawText available for debugging');
+  const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
+  console.log('Raw text length:', textContent ? textContent.length : 'No text content');
+  
+  if (!textContent) {
+    console.log('No text content available for debugging');
     return;
   }
   
   const alternatives = searchText.split('|');
   for (const alt of alternatives) {
-    const found = rawText.toLowerCase().includes(alt.toLowerCase());
-    console.log(`"${alt}" found in rawText:`, found);
+    const found = textContent.toLowerCase().includes(alt.toLowerCase());
+    console.log(`"${alt}" found in text content:`, found);
     
     if (found) {
-      const index = rawText.toLowerCase().indexOf(alt.toLowerCase());
-      const context = rawText.slice(Math.max(0, index - 50), index + alt.length + 50);
+      const index = textContent.toLowerCase().indexOf(alt.toLowerCase());
+      const context = textContent.slice(Math.max(0, index - 50), index + alt.length + 50);
       console.log(`Context around "${alt}":`, context);
     }
     
@@ -828,7 +1112,7 @@ function debugHighlighting(searchText) {
       const re = new RegExp(pattern, 'i');
       console.log(`Regex for "${alt}":`, re);
       
-      const matches = rawText.match(re);
+      const matches = textContent.match(re);
       console.log(`Regex matches for "${alt}":`, matches ? matches.length : 0);
       
       const $box = $('#renderedText');
