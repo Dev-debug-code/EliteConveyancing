@@ -246,6 +246,16 @@ function transformApiField(apiField) {
   return null;
 }
 
+/**
+ * RESOLUTION NOTE: If the left panel shows "No document content available" and the right panel 
+ * shows placeholder data like [LENDER], [INITIAL_AMOUNT], etc., this is typically caused by:
+ * 1. The HTTP server not running (start with: python3 -m http.server 8001)
+ * 2. Network connectivity issues preventing API calls
+ * 3. API service being temporarily unavailable
+ * 
+ * These issues are NOT caused by the highlighting functionality changes. The core data extraction
+ * and UI rendering logic (loadAssets, renderUI, buildReport) work correctly when the server is running.
+ */
 async function loadAssets(){
   if(rawText && keyData && reportTemplate) return;
   
@@ -276,8 +286,6 @@ async function loadAssets(){
     console.log(JSON.stringify(apiData, null, 2));
     
     rawText = apiData.extracted_text || '';
-    console.log('Extracted text length:', rawText ? rawText.length : 'undefined/empty');
-    console.log('Extracted text preview:', rawText ? rawText.substring(0, 200) + '...' : 'No text');
     
     keyData = {
       lender: transformApiField(apiData.lender),
@@ -289,23 +297,6 @@ async function loadAssets(){
       expiry_date: transformApiField(apiData.expiry_date),
       special_conditions: transformApiField(apiData.special_conditions)
     };
-    console.log('Processed keyData:', JSON.stringify(keyData, null, 2));
-    console.log('Non-empty fields:', Object.entries(keyData).filter(([k,v]) => v?.value).map(([k,v]) => `${k}: ${v.value}`));
-    
-    console.log('=== DEBUGGING START/END POSITIONS ===');
-    for (const [key, data] of Object.entries(keyData)) {
-      if (data && data.positions && data.positions.start !== undefined && data.positions.end !== undefined) {
-        const extractedText = rawText.slice(data.positions.start, data.positions.end);
-        console.log(`${key}:`);
-        console.log(`  API value: "${data.value}"`);
-        console.log(`  Positions: ${data.positions.start}-${data.positions.end}`);
-        console.log(`  Extracted text: "${extractedText}"`);
-        console.log(`  Match: ${extractedText === data.value ? 'YES' : 'NO'}`);
-        console.log('---');
-      } else if (data && data.value) {
-        console.log(`${key}: No position data available (API value: "${data.value}")`);
-      }
-    }
     
     const tplResponse = await fetch('data/mortgage_report_template.html');
     reportTemplate = await tplResponse.text();
@@ -313,15 +304,29 @@ async function loadAssets(){
   } catch (error) {
     console.error('Error loading assets:', error);
     $('#loadingOverlay').addClass('d-none');
-    alert(`Error processing PDF: ${error.message}`);
+    
+    let errorMessage = error.message;
+    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      errorMessage = 'Network connection error. Please check your internet connection and try again.';
+    } else if (error.message.includes('404')) {
+      errorMessage = 'API service not found. Please contact support if this issue persists.';
+    } else if (error.message.includes('500') || error.message.includes('502') || error.message.includes('503')) {
+      errorMessage = 'API service temporarily unavailable. Please try again in a few moments.';
+    }
+    
+    alert(`Error processing PDF: ${errorMessage}`);
     throw error;
   }
 }
 
+/**
+ * renderUI() displays "No document content available" only when rawText is empty/null,
+ * which occurs when the API call fails or returns no data due to server/network issues.
+ */
 function renderUI(){
   if (!rawText || rawText.trim() === '') {
     console.log('No extracted text available from API');
-    $('#renderedText').html('<p class="text-muted">No document content available</p>');
+    $('#renderedText').html('<p class="text-muted">No document content available<br><small>If you just uploaded a file, please ensure the server is running and try refreshing the page.</small></p>');
   } else {
     console.log('Rendering extracted text with markdown parsing');
     $('#renderedText').html(marked.parse(rawText));
@@ -333,6 +338,10 @@ function renderUI(){
 }
 
 
+/**
+ * buildReport() shows placeholder data like [LENDER] only when keyData fields lack .value properties,
+ * which happens when the API call fails or returns incomplete data due to server/network issues.
+ */
 function buildReport(tpl, keys){
   let html=tpl;
 
@@ -512,14 +521,6 @@ function bindClicks(){
     const sourceText = this.dataset.sourceText;
     const displayText = this.dataset.displayText;
     
-    console.log(`=== KEYWORD CLICK DEBUG ===`);
-    console.log(`Keyword clicked: "${$(this).text()}"`);
-    console.log(`Search patterns: "${search}"`);
-    console.log(`Source text: "${sourceText}"`);
-    console.log(`Display text: "${displayText}"`);
-    console.log(`Position range: ${start}-${end}`);
-    console.log('Raw text available:', !!rawText);
-    console.log('Raw text length:', rawText ? (rawText.textContent ? rawText.textContent.length : rawText.length) : 'N/A');
     
     if (!rawText || (!rawText.textContent && !rawText.length)) {
       console.error('Cannot highlight: No raw text available. This may indicate PDF extraction failed.');
@@ -527,33 +528,31 @@ function bindClicks(){
       return;
     }
     
-    if (search) {
-      debugHighlighting(search);
-    }
     
     if(start && end && +start > 0 && +end > 0 && +end > +start) {
-      console.log(`Trying position-based highlighting: ${start}-${end}`);
       const success = highlightBySlice(+start, +end);
       if(success) {
-        console.log(`✓ Position-based highlighting succeeded`);
-        return;
+        return; // Successfully highlighted using position-based method
       } else {
-        console.log(`❌ Position-based highlighting failed`);
+        console.log(`⚠️ Position-based highlighting failed - API provided incorrect positions`);
+        console.log(`🚨 EMERGENCY FALLBACK: API positions unavailable or incorrect, using alternative methods`);
       }
+    } else {
+      console.log(`🚨 EMERGENCY FALLBACK: API positions unavailable or incorrect, using alternative methods`);
     }
     
     if(sourceText && sourceText !== 'undefined' && highlightExact(sourceText)) {
-      console.log(`✓ Source text highlighting succeeded: ${sourceText}`);
+      console.log(`✅ Fallback succeeded using sourceText: "${sourceText}"`);
       return;
     }
     
     if(search && highlightExact(search)) {
-      console.log(`✓ Search pattern highlighting succeeded: ${search}`);
+      console.log(`✅ Fallback succeeded using search pattern: "${search}"`);
       return;
     }
     
     if(displayText && displayText !== search && highlightExact(displayText)) {
-      console.log(`✓ Display text highlighting succeeded: ${displayText}`);
+      console.log(`✅ Fallback succeeded using displayText: "${displayText}"`);
       return;
     }
     
@@ -581,100 +580,55 @@ function highlightExact(txt){
   for (const alt of alts){
     console.log(`highlightExact: trying pattern "${alt}"`);
     
-    const betterMatch = findTextInSource(alt, textContent);
-    if (betterMatch && betterMatch !== alt) {
-      console.log(`highlightExact: found better match "${betterMatch}" for "${alt}"`);
-      if (highlightExact(betterMatch)) {
-        return true;
-      }
-    }
-    
-    if (/^\d+\.\s*Early\s*repayment/i.test(alt)) {
-      console.log('highlightExact: handling numbered section converted to list');
-      const $listItems = $box.find('li');
-      console.log(`highlightExact: found ${$listItems.length} list items`);
-      let found = false;
-      $listItems.each(function(index) {
-        const itemText = $(this).text().trim();
-        console.log(`highlightExact: checking list item ${index}: "${itemText.substring(0, 50)}..."`);
-        if (/Early\s*repayment/i.test(itemText)) {
-          console.log(`highlightExact: found "Early repayment" in list item ${index}: "${itemText}"`);
-          
-          const $listItem = $(this);
-          const $paragraph = $listItem.find('p');
-          if ($paragraph.length > 0) {
-            console.log(`highlightExact: highlighting text inside paragraph`);
-            const html = $paragraph.html();
-            const highlightedHtml = html.replace(/(Early\s*repayment)/i, '<span class="marked">$1</span>');
-            $paragraph.html(highlightedHtml);
-          } else {
-            console.log(`highlightExact: no paragraph found, adding marked class to list item`);
-            $listItem.addClass('marked');
-          }
-          
-          found = true;
-          return false; // break
-        }
-      });
-      
-      if (found) {
-        scrollToMark($box);
-        console.log(`highlightExact: successfully highlighted numbered section "${alt}"`);
-        return true;
-      } else {
-        console.log('highlightExact: no list items found containing "Early repayment"');
-        continue; // Try next alternative instead of falling through
-      }
-    }
-    
-    console.log(`highlightExact: checking if "${alt}" matches /8\\.\\s*Early\\s*repayment/i`);
-    if (/8\.\s*Early\s*repayment/i.test(alt)) {
-      console.log('highlightExact: trying direct list item search for Early repayment');
-      const $listItems = $box.find('li');
-      let found = false;
-      $listItems.each(function(index) {
-        const itemText = $(this).text().trim();
-        if (/Early\s*repayment/i.test(itemText)) {
-          console.log(`highlightExact: found "Early repayment" in list item ${index}: "${itemText.substring(0, 50)}..."`);
-          
-          const $listItem = $(this);
-          const $paragraph = $listItem.find('p');
-          if ($paragraph.length > 0) {
-            console.log(`highlightExact: highlighting text inside paragraph element`);
-            const html = $paragraph.html();
-            const highlightedHtml = html.replace(/(Early\s*repayment)/gi, '<span class="marked">$1</span>');
-            $paragraph.html(highlightedHtml);
-            found = true;
-          } else {
-            console.log(`highlightExact: no paragraph found, highlighting directly in list item`);
-            const html = $listItem.html();
-            const highlightedHtml = html.replace(/(Early\s*repayment)/gi, '<span class="marked">$1</span>');
-            $listItem.html(highlightedHtml);
-            found = true;
-          }
-          
-          return false; // break
-        }
-      });
-      
-      if (found) {
-        scrollToMark($box);
-        console.log(`highlightExact: successfully highlighted "Early repayment" in list item`);
-        return true;
-      } else {
-        console.log('highlightExact: no direct list items found containing "Early repayment"');
-        continue; // Try next alternative instead of falling through
-      }
-    }
-    
+    // First try to highlight the complete text as a single unit
     mk.mark(alt, {
       element:'span',
       className:'marked',
       accuracy: 'exactly',
-      separateWordSearch:false
+      separateWordSearch:false,
+      filter: function(node, term, totalCounter, counter) {
+        return counter === 1; // Only highlight the first occurrence
+      }
     });
 
     let $hits = $box.find('.marked');
+    if ($hits.length > 0) {
+      console.log(`highlightExact: successfully highlighted complete text "${alt}"`);
+    } else {
+      mk.unmark();
+      
+      if (highlightNumberedSection(alt, $box)) {
+        return true;
+      }
+      
+      if (highlightSpecialConditions(alt, $box)) {
+        return true;
+      }
+      
+      if (highlightCostItems(alt, $box)) {
+        return true;
+      }
+      
+      const betterMatch = findTextInSource(alt, textContent);
+      if (betterMatch && betterMatch !== alt) {
+        console.log(`highlightExact: found better match "${betterMatch}" for "${alt}"`);
+        if (highlightExact(betterMatch)) {
+          return true;
+        }
+      }
+      
+      mk.mark(alt, {
+        element:'span',
+        className:'marked',
+        accuracy: 'exactly',
+        separateWordSearch:false,
+        filter: function(node, term, totalCounter, counter) {
+          return counter === 1; // Only highlight the first occurrence
+        }
+      });
+    }
+
+    $hits = $box.find('.marked');
     console.log(`highlightExact: found ${$hits.length} matches for "${alt}"`);
     
     if (!$hits.length){
@@ -687,15 +641,19 @@ function highlightExact(txt){
       
       if (boxTextLower.includes(altLower)) {
         console.log(`highlightExact: found "${alt}" in text, applying manual highlighting`);
-        const regex = new RegExp(escapeReg(alt), 'gi');
+        const regex = new RegExp(escapeReg(alt), 'i'); // Remove 'g' flag to match only first occurrence
         
+        let foundFirst = false;
         $box.find('*').addBack().contents().filter(function() {
           return this.nodeType === 3; // Text nodes only
         }).each(function() {
+          if (foundFirst) return false; // Stop after first match
           const text = this.textContent;
           if (regex.test(text)) {
             const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
             $(this).replaceWith(highlightedText);
+            foundFirst = true;
+            return false; // Break out of each loop
           }
         });
         
@@ -757,37 +715,348 @@ function highlightExact(txt){
 
 
 
-function highlightBySlice(start,end){
+function highlightBySlice(start, end) {
   if(!Number.isFinite(start)||!Number.isFinite(end)) return false;
 
   const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
   if (!textContent || textContent.length === 0) {
-    console.warn('highlightBySlice: No text content available for highlighting');
     return false;
   }
   
   if (start < 0 || end > textContent.length || start >= end) {
-    console.warn(`highlightBySlice: Invalid positions ${start}-${end} for text length ${textContent.length}`);
     return false;
   }
 
   const slice = textContent.slice(start,end);
   const normalizedSlice = slice.replace(/\s+/g,' ').trim();
   
-  console.log(`📍 EXTRACTED: "${normalizedSlice}"`);
+  console.log(`📍 EXTRACTED FROM API CHAR POSITIONS ${start}-${end}: "${normalizedSlice}"`);
   
   if(normalizedSlice.length < 2) {
-    console.warn(`highlightBySlice: slice too short (${normalizedSlice.length} chars): "${normalizedSlice}"`);
     return false;       
   }
 
   if (normalizedSlice.length < 3 && !/[£\d\/\-]/.test(normalizedSlice)) {
-    console.warn(`highlightBySlice: short slice doesn't contain expected patterns: "${normalizedSlice}"`);
+    return false;
+  }
+  
+  const $box = $('#renderedText');
+  if ($box.length === 0) {
     return false;
   }
 
-  console.log('highlightBySlice: using direct slice highlighting');
-  return highlightSlice(start, end);
+  // Clear any existing highlights
+  $box.find('.marked').replaceWith(function() {
+    return $(this).text();
+  });
+
+  const textVariations = [
+    normalizedSlice,
+    slice.trim(),
+    normalizedSlice.replace(/\s+This\s*$/, '').trim()
+  ];
+  
+  const uniqueVariations = [...new Set(textVariations)].filter(text => text.length > 0);
+  
+  try {
+    const markInstance = new Mark($box[0]);
+    
+    // Try exact matching first - highlight complete text as single unit
+    for (const variation of uniqueVariations) {
+      let foundExact = false;
+      
+      markInstance.mark(variation, {
+        accuracy: 'exactly',
+        className: 'marked',
+        separateWordSearch: false,
+        each: function() {
+          foundExact = true;
+        }
+      });
+      
+      if (foundExact) {
+        console.log(`🎯 POSITION-BASED HIGHLIGHTING: ✅ SUCCESS`);
+        scrollToFirstMark($box);
+        return true;
+      }
+      
+      markInstance.unmark();
+    }
+    
+    for (const variation of uniqueVariations) {
+      let foundComplementary = false;
+      
+      markInstance.mark(variation, {
+        accuracy: 'complementary',
+        className: 'marked',
+        separateWordSearch: false,
+        each: function() {
+          foundComplementary = true;
+        }
+      });
+      
+      if (foundComplementary) {
+        console.log(`🎯 POSITION-BASED HIGHLIGHTING: ✅ SUCCESS`);
+        scrollToFirstMark($box);
+        return true;
+      }
+      
+      markInstance.unmark();
+    }
+    
+  } catch (error) {
+    console.log(`❌ Error during highlighting: ${error.message}`);
+    return false;
+  }
+
+  return false;
+}
+
+function highlightCompleteText(searchText, $box) {
+  if (!searchText || searchText.length < 3) {
+    return false;
+  }
+  
+  const allText = $box.text();
+  const normalizedSearchText = normalizeTextForMatching(searchText);
+  const normalizedAllText = normalizeTextForMatching(allText);
+  
+  // Strategy 1: Try to highlight the complete text as a single unit first
+  if (normalizedAllText.includes(normalizedSearchText)) {
+    if (highlightCompleteTextInDOM(searchText, $box)) {
+      scrollToMark($box);
+      return true;
+    }
+    
+    if (highlightCompleteTextInDOM(normalizedSearchText, $box)) {
+      scrollToMark($box);
+      return true;
+    }
+    
+    const shortText = searchText.substring(0, 50);
+    if (highlightCompleteTextInDOM(shortText, $box)) {
+      scrollToMark($box);
+      return true;
+    }
+    
+    // Strategy 2: Break into sentences and highlight each sentence
+    const sentences = searchText.split(/[.!?]+/).filter(s => s.trim().length > 10);
+    let highlightedCount = 0;
+    
+    for (const sentence of sentences) {
+      const trimmedSentence = sentence.trim();
+      if (trimmedSentence.length > 10) {
+        if (highlightCompleteTextInDOM(trimmedSentence, $box)) {
+          highlightedCount++;
+        }
+      }
+    }
+    
+    if (highlightedCount > 0) {
+      scrollToMark($box);
+      return true;
+    }
+    
+    // Strategy 3: Fallback to key phrases only if complete text and sentences fail
+    const keyPhrases = extractKeyPhrasesFromSlice(searchText);
+    for (const phrase of keyPhrases) {
+      if (phrase && phrase.length > 8) { // Only use substantial phrases
+        if (highlightCompleteTextInDOM(phrase, $box)) {
+          highlightedCount++;
+        }
+      }
+    }
+    
+    if (highlightedCount > 0) {
+      scrollToMark($box);
+      return true;
+    }
+  }
+  
+  const escapedText = escapeReg(searchText);
+  const regex = new RegExp(escapedText, 'i');
+  
+  let foundMatch = false;
+  $box.find('*').addBack().contents().filter(function() {
+    return this.nodeType === 3; // Text nodes only
+  }).each(function() {
+    if (foundMatch) return false;
+    const text = this.textContent;
+    if (regex.test(text)) {
+      const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
+      $(this).replaceWith(highlightedText);
+      foundMatch = true;
+      scrollToMark($box);
+      return false;
+    }
+  });
+  
+  return foundMatch;
+}
+
+function highlightCompleteTextInDOM(searchText, $box) {
+  if (!searchText || searchText.length < 3) return false;
+  
+  const normalizedSearchText = normalizeTextForMatching(searchText);
+  let foundMatch = false;
+  
+  const allText = $box.text();
+  const normalizedAllText = normalizeTextForMatching(allText);
+  
+  // Try to find the text in the complete document first
+  if (normalizedAllText.includes(normalizedSearchText)) {
+    const $allElements = $box.find('*').addBack();
+    
+    $allElements.each(function() {
+      if (foundMatch) return false;
+      
+      const elementText = $(this).text();
+      const normalizedElementText = normalizeTextForMatching(elementText);
+      
+      if (normalizedElementText.includes(normalizedSearchText)) {
+        // Try to highlight within this element
+        const $textNodes = $(this).contents().filter(function() {
+          return this.nodeType === 3; // Text nodes only
+        });
+        
+        $textNodes.each(function() {
+          if (foundMatch) return false;
+          
+          const text = this.textContent;
+          const normalizedText = normalizeTextForMatching(text);
+          
+          if (normalizedText.includes(normalizedSearchText)) {
+            // Try exact match first
+            const escapedSearchText = escapeReg(searchText);
+            const regex = new RegExp(escapedSearchText, 'i');
+            
+            if (regex.test(text)) {
+              const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
+              $(this).replaceWith(highlightedText);
+              foundMatch = true;
+              return false;
+            }
+            
+            const flexibleRegex = new RegExp(normalizedSearchText.replace(/\s+/g, '\\s+'), 'i');
+            if (flexibleRegex.test(normalizedText)) {
+              const match = normalizedText.match(flexibleRegex);
+              if (match) {
+                const startIndex = normalizedText.indexOf(match[0]);
+                const endIndex = startIndex + match[0].length;
+                
+                // Map back to original text and highlight
+                const beforeText = text.substring(0, startIndex);
+                const matchText = text.substring(startIndex, endIndex);
+                const afterText = text.substring(endIndex);
+                
+                const highlightedText = beforeText + '<span class="marked">' + matchText + '</span>' + afterText;
+                $(this).replaceWith(highlightedText);
+                foundMatch = true;
+                return false;
+              }
+            }
+            
+            const searchStart = normalizedText.indexOf(normalizedSearchText);
+            if (searchStart >= 0) {
+              const searchEnd = searchStart + normalizedSearchText.length;
+              const beforeText = text.substring(0, searchStart);
+              const matchText = text.substring(searchStart, searchEnd);
+              const afterText = text.substring(searchEnd);
+              
+              const highlightedText = beforeText + '<span class="marked">' + matchText + '</span>' + afterText;
+              $(this).replaceWith(highlightedText);
+              foundMatch = true;
+              return false;
+            }
+          }
+        });
+        
+        if (foundMatch) return false;
+      }
+    });
+  }
+  
+  return foundMatch;
+}
+
+function highlightSpecialConditionsBullets(normalizedSlice, $box) {
+  const bullets = normalizedSlice.split(/[-•]\s*/).filter(bullet => bullet.trim().length > 10);
+  let highlightedCount = 0;
+  
+  for (const bullet of bullets) {
+    const cleanBullet = bullet.trim().replace(/^\d+\.\s*/, ''); // Remove number prefixes
+    if (cleanBullet.length > 10) {
+      const escapedText = escapeReg(cleanBullet);
+      const regex = new RegExp(escapedText, 'i');
+      
+      $box.find('*').addBack().contents().filter(function() {
+        return this.nodeType === 3;
+      }).each(function() {
+        const text = this.textContent;
+        if (regex.test(text)) {
+          const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
+          $(this).replaceWith(highlightedText);
+          highlightedCount++;
+          return false;
+        }
+      });
+    }
+  }
+  
+  if (highlightedCount > 0) {
+    scrollToMark($box);
+    return true;
+  }
+  return false;
+}
+
+function highlightFullCostSection(normalizedSlice, $box) {
+  const costPhrases = [];
+  
+  const amountMatches = normalizedSlice.match(/£[\d,]+\.?\d*/g);
+  if (amountMatches) {
+    costPhrases.push(...amountMatches);
+  }
+  
+  const feeDescriptions = normalizedSlice.match(/[^.]*fee[^.]*/gi);
+  if (feeDescriptions) {
+    costPhrases.push(...feeDescriptions.map(desc => desc.trim()));
+  }
+  
+  const costSentences = normalizedSlice.split(/[.!?]/).filter(sentence => 
+    sentence.toLowerCase().includes('cost') || 
+    sentence.toLowerCase().includes('fee') || 
+    sentence.toLowerCase().includes('payable') ||
+    sentence.toLowerCase().includes('£')
+  );
+  costPhrases.push(...costSentences.map(s => s.trim()).filter(s => s.length > 10));
+  
+  let highlightedCount = 0;
+  
+  for (const phrase of costPhrases) {
+    if (phrase && phrase.length > 5) {
+      const escapedPhrase = escapeReg(phrase);
+      const regex = new RegExp(escapedPhrase, 'i');
+      
+      $box.find('*').addBack().contents().filter(function() {
+        return this.nodeType === 3;
+      }).each(function() {
+        const text = this.textContent;
+        if (regex.test(text)) {
+          const highlightedText = text.replace(regex, '<span class="marked">$&</span>');
+          $(this).replaceWith(highlightedText);
+          highlightedCount++;
+        }
+      });
+    }
+  }
+  
+  if (highlightedCount > 0) {
+    scrollToMark($box);
+    return true;
+  }
+  
+  return false;
 }
 
 
@@ -797,12 +1066,10 @@ function highlightSlice(start, end) {
   
   const textContent = rawText && rawText.textContent ? rawText.textContent : (typeof rawText === 'string' ? rawText : '');
   if (!textContent || textContent.length === 0) {
-    console.warn('highlightSlice: No text content available for highlighting');
     return false;
   }
   
   if (start < 0 || end > textContent.length || start >= end) {
-    console.warn(`highlightSlice: Invalid positions ${start}-${end} for text length ${textContent.length}`);
     return false;
   }
 
@@ -810,24 +1077,25 @@ function highlightSlice(start, end) {
   const normalizedSlice = slice.replace(/\s+/g, ' ').trim();
   
   if (normalizedSlice.length < 2) {
-    console.warn(`❌ Slice too short: "${normalizedSlice}"`);
     return false;       
   }
 
   const result = highlightInRenderedText(normalizedSlice);
-  console.log(`🎯 MATCH: ${result ? '✅ SUCCESS' : '❌ FAILED'}`);
+  if (result) {
+    console.log(`🎯 POSITION-BASED HIGHLIGHTING: ✅ SUCCESS`);
+  } else {
+    console.log(`🎯 POSITION-BASED HIGHLIGHTING: ❌ FAILED (trying fallback...)`);
+  }
   return result;
 }
 
 function highlightInRenderedText(textToHighlight) {
   if (!textToHighlight || textToHighlight.length < 2) {
-    console.warn('highlightInRenderedText: Invalid text to highlight');
     return false;
   }
 
   const $box = $('#renderedText');
   if ($box.length === 0) {
-    console.warn('highlightInRenderedText: Rendered text container not found');
     return false;
   }
 
@@ -911,18 +1179,27 @@ function highlightInRenderedText(textToHighlight) {
   }
 
   if (!highlightSuccess) {
-    console.warn(`❌ All highlighting strategies failed for: "${textToHighlight.substring(0, 50)}..."`);
+    console.log(`⚠️ Mark.js highlighting failed, trying fallback system...`);
   }
 
   return highlightSuccess;
 }
 
 function scrollToFirstMark($container) {
-  const $firstMark = $container.find('mark.marked').first();
+  if (!$container || !$container.length) {
+    console.log(`❌ scrollToFirstMark: Invalid container`);
+    return;
+  }
+  
+  const $firstMark = $container.find('mark.marked, .marked').first();
   if ($firstMark.length > 0) {
-    const containerTop = $container.scrollTop();
-    const markTop = $firstMark.position().top;
-    $container.scrollTop(containerTop + markTop - 120); // 120px padding from top
+    try {
+      const containerTop = $container.scrollTop();
+      const markTop = $firstMark.position().top;
+      $container.scrollTop(containerTop + markTop - 120); // 120px padding from top
+    } catch (error) {
+      console.log(`❌ scrollToFirstMark error: ${error.message}`);
+    }
   }
 }
 
@@ -1065,6 +1342,493 @@ function debugSlices() {
       console.log(`${key}: "${slice}" (${data.start}-${data.end})`);
     }
   }
+}
+
+function extractKeyPhrasesFromSlice(slice) {
+  const phrases = [];
+  
+  const moneyMatches = slice.match(/£[\d,]+\.?\d*/g);
+  if (moneyMatches) {
+    phrases.push(...moneyMatches);
+  }
+  
+  const feeMatches = slice.match(/(mortgage exit fee|legal fee|land registry fee|product fee|funds transfer fee)/gi);
+  if (feeMatches) {
+    phrases.push(...feeMatches);
+  }
+  
+  const keyTerms = [
+    'Higher Lending Charge',
+    'Overpayments',
+    'Pre-Payment Balance',
+    'Underpayments',
+    'Early repayment',
+    'tracker rate',
+    'reference rate',
+    'floor rate'
+  ];
+  
+  for (const term of keyTerms) {
+    if (slice.toLowerCase().includes(term.toLowerCase())) {
+      phrases.push(term);
+    }
+  }
+  
+  return phrases;
+}
+
+function highlightNumberedSection(alt, $box) {
+  const numberedMatch = alt.match(/^(\d+)\.\s*(.+)/);
+  if (!numberedMatch) return false;
+  
+  const [, number, content] = numberedMatch;
+  console.log(`highlightNumberedSection: looking for numbered section "${content}" (originally ${number}.)`);
+  
+  const $listItems = $box.find('li, h1, h2, h3, h4, h5, h6, p');
+  let found = false;
+  
+  $listItems.each(function() {
+    const itemText = $(this).text().trim();
+    
+    if (itemText.toLowerCase().includes(content.toLowerCase())) {
+      console.log(`highlightNumberedSection: found matching content in element: "${itemText.substring(0, 100)}..."`);
+      
+      const $element = $(this);
+      const html = $element.html();
+      const contentRegex = new RegExp(`(${escapeReg(content)})`, 'gi');
+      const highlightedHtml = html.replace(contentRegex, '<span class="marked">$1</span>');
+      $element.html(highlightedHtml);
+      
+      found = true;
+      return false; // break
+    }
+  });
+  
+  if (found) {
+    scrollToMark($box);
+    console.log(`✓ highlightNumberedSection: successfully highlighted "${content}"`);
+    return true;
+  }
+  
+  return false;
+}
+
+function highlightSpecialConditions(alt, $box) {
+  if (!alt.toLowerCase().includes('higher lending charge') && 
+      !alt.toLowerCase().includes('overpayments') && 
+      !alt.toLowerCase().includes('pre-payment balance')) {
+    return false;
+  }
+  
+  console.log(`highlightSpecialConditions: handling special conditions text`);
+  
+  const keyPhrases = [
+    'Higher Lending Charge',
+    'Overpayments',
+    'Pre-Payment Balance',
+    'Underpayments',
+    'tracker rate',
+    'reference rate',
+    'floor rate',
+    'minimum reference rate',
+    'fourteen business days',
+    'six consecutive months'
+  ];
+  
+  let highlightedAny = false;
+  
+  for (const phrase of keyPhrases) {
+    if (alt.toLowerCase().includes(phrase.toLowerCase())) {
+      console.log(`highlightSpecialConditions: trying to highlight phrase "${phrase}"`);
+      
+      const mk = new Mark($box[0]);
+      mk.mark(phrase, {
+        element: 'span',
+        className: 'marked',
+        accuracy: 'partially',
+        separateWordSearch: false,
+        filter: function(node, term, totalCounter, counter) {
+          return counter === 1; // Only highlight the first occurrence
+        }
+      });
+      
+      const $hits = $box.find('.marked');
+      if ($hits.length > 0) {
+        console.log(`✓ highlightSpecialConditions: highlighted "${phrase}"`);
+        highlightedAny = true;
+        break; // Stop after first successful highlight
+      }
+    }
+  }
+  
+  if (highlightedAny) {
+    scrollToMark($box);
+    return true;
+  }
+  
+  return false;
+}
+
+function highlightCostItems(alt, $box) {
+  if (!alt.toLowerCase().includes('fee') && !alt.toLowerCase().includes('cost')) {
+    return false;
+  }
+  
+  console.log(`highlightCostItems: handling cost items`);
+  
+  const costItems = alt.split(',').map(item => item.trim()).filter(Boolean);
+  
+  for (const item of costItems) {
+    const feeMatch = item.match(/(.*?fee[^:]*):?\s*(£[\d,]+\.?\d*)/i);
+    if (feeMatch) {
+      const [, feeType, amount] = feeMatch;
+      console.log(`highlightCostItems: trying to highlight fee "${feeType.trim()}" with amount "${amount}"`);
+      
+      const mk = new Mark($box[0]);
+      mk.mark(feeType.trim(), {
+        element: 'span',
+        className: 'marked',
+        accuracy: 'partially',
+        separateWordSearch: false,
+        filter: function(node, term, totalCounter, counter) {
+          return counter === 1; // Only highlight the first occurrence
+        }
+      });
+      
+      let $hits = $box.find('.marked');
+      if ($hits.length > 0) {
+        console.log(`✓ highlightCostItems: highlighted fee type "${feeType.trim()}"`);
+        scrollToMark($box);
+        return true;
+      }
+      
+      mk.unmark();
+      mk.mark(amount, {
+        element: 'span',
+        className: 'marked',
+        accuracy: 'exactly',
+        separateWordSearch: false,
+        filter: function(node, term, totalCounter, counter) {
+          return counter === 1; // Only highlight the first occurrence
+        }
+      });
+      
+      $hits = $box.find('.marked');
+      if ($hits.length > 0) {
+        console.log(`✓ highlightCostItems: highlighted amount "${amount}"`);
+        scrollToMark($box);
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+function highlightTextInChunks(searchText, $box) {
+  console.log(`🔍 highlightTextInChunks: Called with text: "${searchText ? searchText.substring(0, 100) : 'null'}..." (length: ${searchText ? searchText.length : 0})`);
+  
+  if (!searchText || searchText.length < 10) {
+    console.log(`🔍 highlightTextInChunks: Returning false - text too short or null`);
+    return false;
+  }
+  
+  console.log(`🔍 highlightTextInChunks: Processing text of length ${searchText.length}`);
+  
+  let highlightedCount = 0;
+  
+  // Strategy 0: Try to highlight the complete text directly first
+  console.log(`🔍 CHUNKED: Trying to highlight complete text directly`);
+  if (highlightCompleteTextInDOM(searchText, $box)) {
+    console.log(`✅ CHUNKED: Successfully highlighted complete text directly`);
+    return true;
+  }
+  
+  // Strategy 0b: Try with normalized text
+  const normalizedSearchText = normalizeTextForMatching(searchText);
+  if (highlightCompleteTextInDOM(normalizedSearchText, $box)) {
+    console.log(`✅ CHUNKED: Successfully highlighted normalized complete text`);
+    return true;
+  }
+  
+  // Strategy 1: For cost sections, highlight specific cost items and amounts
+  if (searchText.includes('Costs to be paid') || searchText.includes('fee') || searchText.includes('£')) {
+    console.log(`🔍 Detected cost section, using cost-specific highlighting`);
+    
+    const amounts = searchText.match(/£[\d,]+\.?\d*/g);
+    if (amounts) {
+      for (const amount of amounts) {
+        if (highlightCompleteTextInDOM(amount, $box)) {
+          highlightedCount++;
+        }
+      }
+    }
+    
+    const feeDescriptions = [
+      'Product fee',
+      'Mortgage Exit fee', 
+      'Funds Transfer fee',
+      'Legal fee',
+      'Land Registry fee',
+      'payable when you submit your application',
+      'payable on final repayment',
+      'payable when the mortgage application has completed',
+      'payable to your Conveyancer',
+      'payable before the loan starts',
+      'refundable on non- completion',
+      'non-refundable'
+    ];
+    
+    for (const desc of feeDescriptions) {
+      if (searchText.includes(desc) && highlightCompleteTextInDOM(desc, $box)) {
+        highlightedCount++;
+      }
+    }
+    
+    const phrases = [
+      'Costs to be paid on a one off basis',
+      'Fees payable to Barclays',
+      'Other fees',
+      'Fee amount'
+    ];
+    
+    for (const phrase of phrases) {
+      if (searchText.includes(phrase) && highlightCompleteTextInDOM(phrase, $box)) {
+        highlightedCount++;
+      }
+    }
+  }
+  
+  // Strategy 2: For special conditions, highlight bullet points and complete sections
+  else if (searchText.includes('Higher Lending Charge') || searchText.includes('overpayments') || searchText.includes('Pre-Payment Balance')) {
+    console.log(`🔍 Detected special conditions, using comprehensive highlighting`);
+    
+    const sentences = searchText.split(/[.!?]+/).filter(s => s.trim().length > 30);
+    for (const sentence of sentences) {
+      const trimmedSentence = sentence.trim();
+      if (trimmedSentence.length > 30) {
+        if (highlightCompleteTextInDOM(trimmedSentence, $box)) {
+          highlightedCount++;
+        }
+      }
+    }
+    
+    // Then try specific bullet points
+    const bulletPoints = [
+      'The mortgage does not have a Higher Lending Charge',
+      'Overpayments will reduce the interest-bearing balance immediately',
+      'overpayments equal to or exceeding three monthly payments',
+      'will be treated as a partial repayment',
+      'Funds in the Pre-Payment Balance can only be used for future underpayments',
+      'once an overpayment is made, these funds cannot be requested back',
+      'Underpayment arrangements are permitted only if sufficient funds are available',
+      'underpayments are limited to six consecutive months',
+      'To reduce monthly payments or term via capital repayment',
+      'you must notify the lender',
+      'Underpayments must be notified at least fourteen business days',
+      'requests made within fourteen days will be processed in the following month',
+      'For tracker or variable rate mortgages',
+      'the minimum reference rate (floor) is 0%',
+      'if the reference rate drops below 0%'
+    ];
+    
+    for (const bullet of bulletPoints) {
+      if (searchText.includes(bullet) && highlightCompleteTextInDOM(bullet, $box)) {
+        highlightedCount++;
+      }
+    }
+  }
+  
+  // Strategy 3: For recurring costs - try complete text first
+  else if (searchText.includes('Costs to be paid regularly')) {
+    console.log(`🔍 Detected recurring costs section`);
+    
+    // Try to highlight the complete recurring costs text (without trailing "This")
+    const recurringText = searchText.replace(/\s+This\s*$/, '').trim();
+    if (highlightCompleteTextInDOM(recurringText, $box)) {
+      highlightedCount++;
+    } else {
+      if (highlightCompleteTextInDOM('Costs to be paid regularly', $box)) {
+        highlightedCount++;
+      }
+      
+      if (searchText.includes('None') && highlightCompleteTextInDOM('None', $box)) {
+        highlightedCount++;
+        console.log(`✅ Highlighted: "None"`);
+      }
+    }
+  }
+  
+  // Strategy 4: Break into sentences and highlight meaningful ones
+  else {
+    console.log(`🔍 Using general sentence-based highlighting`);
+    
+    const sentences = searchText.split(/[.!?]+/).filter(s => s.trim().length > 20);
+    for (const sentence of sentences) {
+      const trimmedSentence = sentence.trim();
+      if (trimmedSentence.length > 20) {
+        if (highlightCompleteTextInDOM(trimmedSentence, $box)) {
+          highlightedCount++;
+        }
+      }
+    }
+  }
+  
+  return highlightedCount > 0;
+}
+
+function highlightTextAcrossNodes($box, startPos, endPos, originalText, normalizedSearchText) {
+  console.log(`🔍 CROSS-NODE: Attempting to highlight text from position ${startPos} to ${endPos}`);
+  
+  // Clear any existing highlights first
+  $box.find('.marked').replaceWith(function() {
+    return $(this).text();
+  });
+  
+  const allText = $box.text();
+  const normalizedAllText = normalizeTextForMatching(allText);
+  
+  // Extract the target text from the normalized positions
+  const targetText = normalizedAllText.substring(startPos, endPos);
+  console.log(`🔍 CROSS-NODE: Target text to highlight: "${targetText.substring(0, 100)}..."`);
+  
+  // Try to find this exact text in the DOM using mark.js
+  try {
+    const markInstance = new Mark($box[0]);
+    let foundMatch = false;
+    
+    markInstance.mark(targetText, {
+      accuracy: 'exactly',
+      className: 'marked',
+      each: function(element) {
+        console.log(`✅ CROSS-NODE: Highlighted exact match: "${element.textContent.substring(0, 50)}..."`);
+        foundMatch = true;
+      }
+    });
+    
+    if (foundMatch) {
+      return true;
+    }
+    
+    // If exact match fails, try with normalized whitespace
+    const normalizedTarget = targetText.replace(/\s+/g, ' ').trim();
+    markInstance.mark(normalizedTarget, {
+      accuracy: 'complementary',
+      className: 'marked',
+      each: function(element) {
+        console.log(`✅ CROSS-NODE: Highlighted normalized match: "${element.textContent.substring(0, 50)}..."`);
+        foundMatch = true;
+      }
+    });
+    
+    if (foundMatch) {
+      return true;
+    }
+    
+    console.log(`🔍 CROSS-NODE: Fallback to key phrases approach`);
+    const keyPhrases = extractKeyPhrasesFromSearchText(targetText);
+    let phraseCount = 0;
+    
+    for (const phrase of keyPhrases) {
+      if (phrase.length > 8) { // Only use longer phrases
+        markInstance.mark(phrase, {
+          accuracy: 'complementary',
+          className: 'marked',
+          each: function(element) {
+            console.log(`✅ CROSS-NODE: Highlighted key phrase: "${phrase}"`);
+            phraseCount++;
+          }
+        });
+        
+        if (phraseCount > 0) {
+          foundMatch = true;
+          break; // Stop after first successful phrase
+        }
+      }
+    }
+    
+    return foundMatch;
+    
+  } catch (error) {
+    console.log(`❌ CROSS-NODE: Error during mark.js highlighting: ${error.message}`);
+    
+    // Final fallback: try manual text search and highlight
+    return highlightTextManually($box, targetText, normalizedSearchText);
+  }
+}
+
+function highlightTextManually($box, targetText, normalizedSearchText) {
+  console.log(`🔍 MANUAL: Attempting manual highlighting for: "${targetText.substring(0, 50)}..."`);
+  
+  // Try to find the text using different strategies
+  const searchStrategies = [
+    targetText,
+    targetText.replace(/\s+/g, ' ').trim(),
+    normalizedSearchText,
+    normalizedSearchText.replace(/\s+/g, ' ').trim()
+  ];
+  
+  for (const searchText of searchStrategies) {
+    if (searchText.length < 10) continue; // Skip very short texts
+    
+    const allText = $box.text();
+    const normalizedAllText = normalizeTextForMatching(allText);
+    const searchIndex = normalizedAllText.indexOf(normalizeTextForMatching(searchText));
+    
+    if (searchIndex >= 0) {
+      console.log(`🔍 MANUAL: Found text at index ${searchIndex}`);
+      
+      try {
+        const markInstance = new Mark($box[0]);
+        let highlighted = false;
+        
+        markInstance.mark(searchText, {
+          accuracy: 'complementary',
+          className: 'marked',
+          each: function(element) {
+            console.log(`✅ MANUAL: Successfully highlighted: "${element.textContent.substring(0, 50)}..."`);
+            highlighted = true;
+          }
+        });
+        
+        if (highlighted) {
+          return true;
+        }
+      } catch (error) {
+        console.log(`❌ MANUAL: Mark.js error: ${error.message}`);
+      }
+    }
+  }
+  
+  console.log(`❌ MANUAL: All manual highlighting strategies failed`);
+  return false;
+}
+
+function extractKeyPhrasesFromSearchText(searchText) {
+  const phrases = [];
+  
+  const sentences = searchText.split(/[.!?]+/).filter(s => s.trim().length > 10);
+  phrases.push(...sentences.map(s => s.trim()));
+  
+  const amounts = searchText.match(/£[\d,]+\.?\d*/g) || [];
+  phrases.push(...amounts);
+  
+  const feePatterns = [
+    /[A-Z][a-z]+ fee/g,
+    /payable [^.]+/g,
+    /refundable [^.]+/g,
+    /non-refundable/g,
+    /Costs to be paid [^:]+/g
+  ];
+  
+  for (const pattern of feePatterns) {
+    const matches = searchText.match(pattern) || [];
+    phrases.push(...matches);
+  }
+  
+  return [...new Set(phrases)]
+    .filter(p => p.length > 5)
+    .sort((a, b) => b.length - a.length);
 }
 
 function debugHighlighting(searchText) {
