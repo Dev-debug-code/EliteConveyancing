@@ -38,7 +38,7 @@ body,
 /* ------------------------------------------------------------------
    3.  Keyword highlights
 ------------------------------------------------------------------*/
-.keyword   {cursor:pointer;text-decoration:underline;}
+.clickable-keyword   {cursor:pointer;text-decoration:underline;}
 .conf-high {background:var(--high);}
 .conf-mid  {background:var(--mid);}
 .conf-low  {background:var(--low);}
