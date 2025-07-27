@@ -404,7 +404,7 @@ function buildReport(tpl, keys){
                     : info.confidence?.recurring_costs === 0 ? 'conf-low' : 'conf-mid';
 
       html = html.replaceAll(ph, `
-        <span class="keyword ${clsOne}"
+        <span class="clickable-keyword ${clsOne}"
               data-search="${esc(oneOffCosts)}"
               data-source-text="${esc(oneOffCosts)}"
               data-display-text="${esc(formattedOneOff)}"
@@ -412,7 +412,7 @@ function buildReport(tpl, keys){
               data-end="${v.positions?.end?.one_off_costs || 0}">
           ${esc(formattedOneOff)}
         </span><br>
-        <span class="keyword ${clsRec}"
+        <span class="clickable-keyword ${clsRec}"
               data-search="${esc(recurringValue)}"
               data-source-text="${esc(recurringValue)}"
               data-display-text="${esc(formattedRecurring)}"
@@ -487,7 +487,7 @@ function buildReport(tpl, keys){
 
     html = html.replaceAll(
       ph,
-      `<span class="keyword ${cls}"
+      `<span class="clickable-keyword ${cls}"
              data-search="${esc(search)}"
              data-source-text="${esc(info.value || search)}"
              data-display-text="${esc(displayContent)}"
@@ -516,7 +516,7 @@ function dbgMark(pat){
 
 function bindClicks(){
   $('#renderedText').show();
-  $('#report').off('click', '.keyword').on('click', '.keyword', function(){
+  $('#report').off('click', '.clickable-keyword').on('click', '.clickable-keyword', function(){
     const {search, start, end} = this.dataset;
     const sourceText = this.dataset.sourceText;
     const displayText = this.dataset.displayText;
@@ -541,9 +541,27 @@ function bindClicks(){
       console.log(`🚨 EMERGENCY FALLBACK: API positions unavailable or incorrect, using alternative methods`);
     }
     
-    if(sourceText && sourceText !== 'undefined' && highlightExact(sourceText)) {
-      console.log(`✅ Fallback succeeded using sourceText: "${sourceText}"`);
-      return;
+    if(sourceText && sourceText !== 'undefined') {
+      console.log(`bindClicks: sourceText length: ${sourceText.length}`);
+      console.log(`bindClicks: sourceText includes 'higher lending charge': ${sourceText.toLowerCase().includes('higher lending charge')}`);
+      console.log(`bindClicks: sourceText includes 'overpayments': ${sourceText.toLowerCase().includes('overpayments')}`);
+      console.log(`bindClicks: sourceText includes 'pre-payment balance': ${sourceText.toLowerCase().includes('pre-payment balance')}`);
+      
+      if (sourceText.length > 50 && 
+          (sourceText.toLowerCase().includes('higher lending charge') || 
+           sourceText.toLowerCase().includes('overpayments') || 
+           sourceText.toLowerCase().includes('pre-payment balance'))) {
+        console.log(`🎯 Detected special conditions text, using enhanced highlighting`);
+        if (highlightSpecialConditions(sourceText, $('#renderedText'))) {
+          console.log(`✅ Special conditions highlighting succeeded`);
+          return;
+        }
+      }
+      
+      if (highlightExact(sourceText)) {
+        console.log(`✅ Fallback succeeded using sourceText: "${sourceText}"`);
+        return;
+      }
     }
     
     if(search && highlightExact(search)) {
@@ -574,8 +592,8 @@ function highlightExact(txt){
   const mk   = new Mark($box[0]);
   mk.unmark();                                
 
-  const alts = txt.split('|').map(s => s.trim()).filter(Boolean);
-  console.log('highlightExact: trying alternatives:', alts);
+  const alts = createTextVariations(txt);
+  console.log('highlightExact: trying alternatives:', alts.slice(0, 3)); // Log first 3 to avoid spam
 
   for (const alt of alts){
     console.log(`highlightExact: trying pattern "${alt}"`);
@@ -727,16 +745,22 @@ function highlightBySlice(start, end) {
     return false;
   }
 
-  const slice = textContent.slice(start,end);
-  const normalizedSlice = slice.replace(/\s+/g,' ').trim();
+  const mappedText = mapRawTextToMarkdownPositions(textContent, start, end);
+  if (!mappedText) {
+    return false;
+  }
   
-  console.log(`📍 EXTRACTED FROM API CHAR POSITIONS ${start}-${end}: "${normalizedSlice}"`);
+  const slice = mappedText.originalSlice;
+  const markdownSlice = mappedText.markdownSlice;
   
-  if(normalizedSlice.length < 2) {
+  console.log(`📍 EXTRACTED FROM API CHAR POSITIONS ${start}-${end}: "${slice}"`);
+  console.log(`📍 MARKDOWN-COMPATIBLE VERSION: "${markdownSlice}"`);
+  
+  if(markdownSlice.length < 2) {
     return false;       
   }
 
-  if (normalizedSlice.length < 3 && !/[£\d\/\-]/.test(normalizedSlice)) {
+  if (markdownSlice.length < 3 && !/[£\d\/\-]/.test(markdownSlice)) {
     return false;
   }
   
@@ -745,17 +769,26 @@ function highlightBySlice(start, end) {
     return false;
   }
 
+  // Check if this is special conditions text and use enhanced highlighting
+  if (markdownSlice.length > 50 && 
+      (markdownSlice.toLowerCase().includes('higher lending charge') || 
+       markdownSlice.toLowerCase().includes('overpayments') || 
+       markdownSlice.toLowerCase().includes('pre-payment balance') ||
+       markdownSlice.toLowerCase().includes('supplementary conditions'))) {
+    console.log(`🎯 Detected special conditions text, using enhanced highlighting`);
+    if (highlightSpecialConditionsWithMapping(slice, markdownSlice, $box)) {
+      console.log(`🎯 POSITION-BASED HIGHLIGHTING: ✅ SUCCESS`);
+      return true;
+    }
+  }
+
+  // Continue with existing logic but use markdownSlice for highlighting
   // Clear any existing highlights
   $box.find('.marked').replaceWith(function() {
     return $(this).text();
   });
 
-  const textVariations = [
-    normalizedSlice,
-    slice.trim(),
-    normalizedSlice.replace(/\s+This\s*$/, '').trim()
-  ];
-  
+  const textVariations = createTextVariations(markdownSlice);
   const uniqueVariations = [...new Set(textVariations)].filter(text => text.length > 0);
   
   try {
@@ -1074,7 +1107,7 @@ function highlightSlice(start, end) {
   }
 
   const slice = textContent.slice(start, end);
-  const normalizedSlice = slice.replace(/\s+/g, ' ').trim();
+  const normalizedSlice = normalizeTextForMatching(slice);
   
   if (normalizedSlice.length < 2) {
     return false;       
@@ -1227,7 +1260,7 @@ async function downloadReportPDF(){
   clone.style.display='block';
   clone.classList.remove('overflow-auto');
 
-  clone.querySelectorAll('.keyword,.marked')
+  clone.querySelectorAll('.clickable-keyword,.marked')
        .forEach(el=>el.replaceWith(document.createTextNode(el.textContent)));
 
   clone.querySelectorAll('h1, h2, h3').forEach(el => {
@@ -1289,6 +1322,31 @@ function scrollToMark($c){ const $m=$c.find('.marked').first();
 function escapeReg(s){ return s.replace(/[.*+?^${}()|[\]\\\/]/g,'\\$&'); }
 function esc(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+function mapRawTextToMarkdownPositions(rawText, start, end) {
+  if (!rawText || start < 0 || end > rawText.length || start >= end) {
+    return null;
+  }
+  
+  // Extract the slice from raw text
+  const slice = rawText.slice(start, end);
+  
+  // Create a version that matches how markdown processes the text
+  let markdownCompatibleSlice = slice;
+  
+  markdownCompatibleSlice = markdownCompatibleSlice.replace(/^\s*\d+\.\s+/gm, '');
+  
+  markdownCompatibleSlice = markdownCompatibleSlice
+    .replace(/\n\s*\n/g, '\n\n') // Normalize paragraph breaks
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+  
+  return {
+    originalSlice: slice,
+    markdownSlice: markdownCompatibleSlice,
+    length: markdownCompatibleSlice.length
+  };
+}
+
 function normalizeTextForMatching(text) {
   if (!text) return '';
   return text
@@ -1298,6 +1356,7 @@ function normalizeTextForMatching(text) {
     .replace(/£(\d+)\.(\d+)/g, '£$1.$2')  // Normalize currency
     .replace(/\u00a0/g, ' ')  // Replace non-breaking spaces
     .replace(/[•·]/g, '-')  // Normalize bullet points
+    // Only remove them if the text is short (likely not special conditions)
     .replace(/\n\s*-/g, ' -')  // Normalize line breaks before dashes
     .replace(/\n+/g, ' ')  // Replace line breaks with spaces
     .trim();
@@ -1328,6 +1387,88 @@ function findTextInSource(displayText, rawText) {
   
   return null;
 }
+function createTextVariations(originalText) {
+  if (!originalText) return [];
+  
+  const variations = [
+    originalText, // Original text
+    normalizeTextForMatching(originalText) // Basic normalization
+  ];
+  
+  // Create variation without numbered bullets
+  const withoutNumbers = originalText.replace(/\b\d+\.\s+/g, '');
+  variations.push(normalizeTextForMatching(withoutNumbers));
+  
+  // Create variation with renumbered bullets starting from 1
+  let bulletCounter = 1;
+  const withNormalizedNumbers = originalText.replace(/\b\d+\.\s+/g, () => `${bulletCounter++}. `);
+  variations.push(normalizeTextForMatching(withNormalizedNumbers));
+  
+  // Create variation with generic bullet points
+  const withGenericBullets = originalText.replace(/\b\d+\.\s+/g, '- ');
+  variations.push(normalizeTextForMatching(withGenericBullets));
+  
+  // Add variation that handles dash bullets specifically for left panel matching
+  const withDashBullets = originalText.replace(/\b\d+\.\s+/g, '- ');
+  variations.push(withDashBullets.trim()); // Don't normalize this one to preserve exact format
+  
+  const apiStyleNumbering = originalText.replace(/\b(\d+)\.\s+/g, (match, num) => {
+    const originalNum = parseInt(num);
+    const newNum = variations.length - 4; // Adjust based on position in variations
+    return `${Math.max(1, newNum)}. `;
+  });
+  variations.push(normalizeTextForMatching(apiStyleNumbering));
+  
+  // Create variations that handle different numbering schemes more comprehensively
+  const commonStarts = [1, 10, 15, 16, 17, 20, 25];
+  for (const startNum of commonStarts) {
+    let counter = startNum;
+    const withDifferentStart = originalText.replace(/\b\d+\.\s+/g, () => `${counter++}. `);
+    variations.push(normalizeTextForMatching(withDifferentStart));
+  }
+  
+  // Create a version that maps common number sequences
+  const numberMappings = [
+    { from: [15, 16, 17], to: [1, 2, 3] },
+    { from: [1, 2, 3], to: [15, 16, 17] },
+    { from: [20, 21, 22], to: [1, 2, 3] },
+    { from: [1, 2, 3], to: [20, 21, 22] }
+  ];
+  
+  for (const mapping of numberMappings) {
+    let mappedText = originalText;
+    for (let i = 0; i < mapping.from.length && i < mapping.to.length; i++) {
+      const fromPattern = new RegExp(`\\b${mapping.from[i]}\\.\\s+`, 'g');
+      mappedText = mappedText.replace(fromPattern, `${mapping.to[i]}. `);
+    }
+    if (mappedText !== originalText) {
+      variations.push(normalizeTextForMatching(mappedText));
+    }
+  }
+  
+  // Extract key phrases for individual highlighting
+  const keyPhrases = originalText.match(/(?:Higher Lending Charge|Overpayments|Pre-Payment Balance|Underpayments|tracker rate|reference rate|fourteen business days|six consecutive months)[^.]*\./gi);
+  if (keyPhrases) {
+    variations.push(...keyPhrases.map(phrase => normalizeTextForMatching(phrase)));
+  }
+  
+  // Create chunks of text between bullets for partial matching
+  const textChunks = originalText.split(/\b\d+\.\s+/).filter(chunk => chunk.trim().length > 20);
+  textChunks.forEach(chunk => {
+    variations.push(normalizeTextForMatching(chunk.trim()));
+  });
+  
+  // Create variations with different spacing around numbers
+  const withTightSpacing = originalText.replace(/\b(\d+)\.\s+/g, '$1.');
+  variations.push(normalizeTextForMatching(withTightSpacing));
+  
+  const withExtraSpacing = originalText.replace(/\b(\d+)\.\s+/g, '$1.  ');
+  variations.push(normalizeTextForMatching(withExtraSpacing));
+  
+  return [...new Set(variations)].filter(v => v && v.length > 0);
+}
+
+
 
 function debugSlices() {
   if (!rawText || !keyData) {
@@ -1339,7 +1480,8 @@ function debugSlices() {
   for (const [key, data] of Object.entries(keyData)) {
     if (data?.start && data?.end) {
       const slice = rawText.slice(data.start, data.end);
-      console.log(`${key}: "${slice}" (${data.start}-${data.end})`);
+      const normalizedSlice = normalizeTextForMatching(slice);
+      console.log(`${key}: "${normalizedSlice}" (${data.start}-${data.end})`);
     }
   }
 }
@@ -1413,6 +1555,121 @@ function highlightNumberedSection(alt, $box) {
   return false;
 }
 
+function highlightSpecialConditionsWithMapping(originalSlice, markdownSlice, $box) {
+  console.log(`highlightSpecialConditionsWithMapping: handling special conditions`);
+  console.log(`Original slice length: ${originalSlice.length}`);
+  console.log(`Markdown slice length: ${markdownSlice.length}`);
+  
+  // Clear any existing highlights
+  $box.find('.marked').replaceWith(function() {
+    return $(this).text();
+  });
+  
+  try {
+    const markInstance = new Mark($box[0]);
+    
+    // Strategy 1: Try to highlight the complete markdown-compatible text
+    console.log(`🎯 APPROACH 1: Attempting complete markdown-compatible text match`);
+    
+    let foundComplete = false;
+    
+    markInstance.mark(markdownSlice, {
+      accuracy: 'complementary',
+      className: 'marked',
+      separateWordSearch: false,
+      acrossElements: true,
+      each: function() {
+        foundComplete = true;
+      }
+    });
+    
+    if (foundComplete) {
+      console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with complete markdown text`);
+      scrollToMark($box);
+      return true;
+    }
+    
+    markInstance.unmark();
+    
+    // Strategy 2: Break into sentences and highlight each
+    console.log(`🎯 APPROACH 2: Attempting sentence-by-sentence highlighting`);
+    
+    const sentences = markdownSlice.split(/(?<=[.!?])\s+(?=[A-Z-])/).filter(s => s.trim().length > 15);
+    let highlightedCount = 0;
+    
+    for (const sentence of sentences) {
+      const trimmedSentence = sentence.trim();
+      
+      if (trimmedSentence.length > 15) {
+        let foundSentence = false;
+        
+        markInstance.mark(trimmedSentence, {
+          accuracy: 'complementary',
+          className: 'marked',
+          separateWordSearch: false,
+          acrossElements: true,
+          each: function() {
+            foundSentence = true;
+          }
+        });
+        
+        if (foundSentence) {
+          console.log(`✓ highlightSpecialConditionsWithMapping: highlighted sentence "${trimmedSentence.substring(0, 50)}..."`);
+          highlightedCount++;
+        }
+      }
+    }
+    
+    if (highlightedCount > 0) {
+      console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with ${highlightedCount} sentences highlighted`);
+      scrollToMark($box);
+      return true;
+    }
+    
+    // Strategy 3: Try key phrases from the markdown text
+    console.log(`🎯 APPROACH 3: Attempting key phrase highlighting`);
+    
+    const keyPhrases = [
+      'mortgage does not have a Higher Lending Charge',
+      'Higher Lending Charge',
+      'Overpayments will reduce the interest-bearing balance immediately',
+      'overpayments equal to or exceeding three monthly payments',
+      'Pre-Payment Balance can only be used for future underpayments',
+      'Underpayment arrangements are permitted',
+      'underpayments for up to six consecutive months',
+      'notify the lender at least 14 business days',
+      'minimum reference rate (floor) is 0%'
+    ];
+    
+    for (const phrase of keyPhrases) {
+      if (markdownSlice.toLowerCase().includes(phrase.toLowerCase())) {
+        console.log(`highlightSpecialConditionsWithMapping: trying to highlight key phrase "${phrase}"`);
+        
+        markInstance.mark(phrase, {
+          accuracy: 'complementary',
+          className: 'marked',
+          separateWordSearch: false,
+          each: function() {
+            highlightedCount++;
+          }
+        });
+      }
+    }
+    
+    if (highlightedCount > 0) {
+      console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with key phrase approach`);
+      scrollToMark($box);
+      return true;
+    }
+    
+  } catch (error) {
+    console.error('highlightSpecialConditionsWithMapping: Error during highlighting:', error);
+  }
+  
+  console.log(`❌ highlightSpecialConditionsWithMapping: all strategies failed`);
+  return false;
+}
+
 function highlightSpecialConditions(alt, $box) {
   if (!alt.toLowerCase().includes('higher lending charge') && 
       !alt.toLowerCase().includes('overpayments') && 
@@ -1421,42 +1678,309 @@ function highlightSpecialConditions(alt, $box) {
   }
   
   console.log(`highlightSpecialConditions: handling special conditions text`);
+  console.log(`highlightSpecialConditions: alt text length: ${alt.length}`);
+  console.log(`🔍 EXTRACTED FROM API CHAR POSITIONS: "${alt}"`);
   
-  const keyPhrases = [
-    'Higher Lending Charge',
-    'Overpayments',
-    'Pre-Payment Balance',
-    'Underpayments',
-    'tracker rate',
-    'reference rate',
-    'floor rate',
-    'minimum reference rate',
-    'fourteen business days',
-    'six consecutive months'
-  ];
+  // Clear any existing highlights
+  $box.find('.marked').replaceWith(function() {
+    return $(this).text();
+  });
   
-  let highlightedAny = false;
+  const leftPanelText = $('#renderedText').text();
+  console.log(`🔍 LEFT PANEL TEXT PREVIEW: "${leftPanelText.substring(0, 500)}..."`);
   
-  for (const phrase of keyPhrases) {
-    if (alt.toLowerCase().includes(phrase.toLowerCase())) {
-      console.log(`highlightSpecialConditions: trying to highlight phrase "${phrase}"`);
-      
-      const mk = new Mark($box[0]);
-      mk.mark(phrase, {
-        element: 'span',
-        className: 'marked',
-        accuracy: 'partially',
-        separateWordSearch: false,
-        filter: function(node, term, totalCounter, counter) {
-          return counter === 1; // Only highlight the first occurrence
+  try {
+    const markInstance = new Mark($box[0]);
+    
+    console.log(`🎯 APPROACH 1: Attempting complete text match with bullet point variations`);
+    
+    // Create comprehensive text variations to handle bullet point mismatches
+    const completeTextVariations = [];
+    
+    // Original text
+    completeTextVariations.push(alt);
+    
+    const withoutPrefix = alt.replace(/^Supplementary Conditions:\s*The attached special conditions also apply\.\s*/i, '');
+    completeTextVariations.push(withoutPrefix);
+    
+    // Create version with numbered bullets (1., 2., 3., etc.)
+    const sentences = alt.split(/(?<=[.!?])\s+(?=[A-Z])/);
+    let numberedVersion = '';
+    let bulletNum = 1;
+    
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length > 20) {
+        if (trimmed.toLowerCase().startsWith('this product does not have') ||
+            trimmed.toLowerCase().startsWith('overpayments') ||
+            trimmed.toLowerCase().startsWith('underpayments') ||
+            trimmed.toLowerCase().startsWith('if you have a tracker') ||
+            trimmed.toLowerCase().startsWith('the funds in the pre-payment') ||
+            trimmed.toLowerCase().startsWith('if you want to make underpayments') ||
+            trimmed.toLowerCase().startsWith('if you want to use your pre-payment')) {
+          numberedVersion += `${bulletNum}. ${trimmed} `;
+          bulletNum++;
+        } else {
+          numberedVersion += `${trimmed} `;
         }
-      });
+      }
+    }
+    completeTextVariations.push(numberedVersion.trim());
+    
+    // Create version with dash bullets
+    let dashVersion = '';
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length > 20) {
+        if (trimmed.toLowerCase().startsWith('this product does not have') ||
+            trimmed.toLowerCase().startsWith('overpayments') ||
+            trimmed.toLowerCase().startsWith('underpayments') ||
+            trimmed.toLowerCase().startsWith('if you have a tracker') ||
+            trimmed.toLowerCase().startsWith('the funds in the pre-payment') ||
+            trimmed.toLowerCase().startsWith('if you want to make underpayments') ||
+            trimmed.toLowerCase().startsWith('if you want to use your pre-payment')) {
+          dashVersion += `- ${trimmed} `;
+        } else {
+          dashVersion += `${trimmed} `;
+        }
+      }
+    }
+    completeTextVariations.push(dashVersion.trim());
+    
+    completeTextVariations.push(normalizeTextForMatching(alt));
+    completeTextVariations.push(normalizeTextForMatching(withoutPrefix));
+    completeTextVariations.push(normalizeTextForMatching(numberedVersion));
+    completeTextVariations.push(normalizeTextForMatching(dashVersion));
+    
+    console.log(`🔍 Created ${completeTextVariations.length} complete text variations`);
+    
+    for (let i = 0; i < completeTextVariations.length; i++) {
+      const variation = completeTextVariations[i];
+      if (variation && variation.length > 100) {
+        console.log(`🔍 Trying complete text variation ${i + 1}: "${variation.substring(0, 150)}..."`);
+        
+        let foundComplete = false;
+        
+        markInstance.mark(variation, {
+          accuracy: 'complementary',
+          className: 'marked',
+          separateWordSearch: false,
+          each: function() {
+            foundComplete = true;
+          }
+        });
+        
+        if (foundComplete) {
+          console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with complete text variation ${i + 1}`);
+          scrollToMark($box);
+          return true;
+        }
+        
+        markInstance.unmark();
+      }
+    }
+    
+    console.log(`🎯 APPROACH 2: Attempting sentence-by-sentence highlighting`);
+    
+    // Extract individual sentences/bullet points from the API text
+    const bulletSentences = [];
+    
+    const rawSentences = alt.split(/\.\s+/);
+    
+    for (const sentence of rawSentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length > 15) {
+        let cleanSentence = trimmed;
+        if (!cleanSentence.endsWith('.') && !cleanSentence.endsWith('!') && !cleanSentence.endsWith('?')) {
+          cleanSentence += '.';
+        }
+        
+        cleanSentence = cleanSentence.replace(/^Supplementary Conditions:\s*The attached special conditions also apply\.\s*/i, '');
+        
+        if (cleanSentence.length > 15) {
+          bulletSentences.push(cleanSentence);
+        }
+      }
+    }
+    
+    console.log(`🔍 Extracted ${bulletSentences.length} sentences for individual highlighting`);
+    
+    let highlightedAny = false;
+    
+    for (let sentenceIndex = 0; sentenceIndex < bulletSentences.length; sentenceIndex++) {
+      const sentence = bulletSentences[sentenceIndex];
+      console.log(`🔍 Trying to highlight sentence ${sentenceIndex + 1}: "${sentence.substring(0, 100)}..."`);
       
-      const $hits = $box.find('.marked');
-      if ($hits.length > 0) {
-        console.log(`✓ highlightSpecialConditions: highlighted "${phrase}"`);
-        highlightedAny = true;
-        break; // Stop after first successful highlight
+      // Create variations for this sentence
+      const sentenceVariations = [
+        sentence,
+        normalizeTextForMatching(sentence)
+      ];
+      
+      // Add numbered bullet versions (try different numbers)
+      for (let num = 1; num <= 10; num++) {
+        sentenceVariations.push(`${num}. ${sentence}`);
+        sentenceVariations.push(normalizeTextForMatching(`${num}. ${sentence}`));
+      }
+      
+      sentenceVariations.push(`- ${sentence}`);
+      sentenceVariations.push(normalizeTextForMatching(`- ${sentence}`));
+      
+      // Try to highlight this sentence with any of its variations
+      for (const sentenceVar of sentenceVariations) {
+        if (sentenceVar && sentenceVar.length > 15) {
+          let foundSentence = false;
+          
+          markInstance.mark(sentenceVar, {
+            accuracy: 'complementary',
+            className: 'marked',
+            separateWordSearch: false,
+            each: function() {
+              foundSentence = true;
+            }
+          });
+          
+          if (foundSentence) {
+            console.log(`✓ highlightSpecialConditions: highlighted sentence ${sentenceIndex + 1}`);
+            highlightedAny = true;
+            break; // Move to next sentence
+          }
+        }
+      }
+    }
+    
+    if (highlightedAny) {
+      console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with sentence-by-sentence approach`);
+      scrollToMark($box);
+      return true;
+    }
+    
+  } catch (error) {
+    console.error('highlightSpecialConditions: Error during highlighting:', error);
+  }
+  
+  console.log(`highlightSpecialConditions: chunk highlighting failed, trying complete text reconstruction`);
+  
+  // Strategy: Reconstruct the complete text with numbered bullets to match left panel format
+  console.log(`🔍 EXTRACTED FROM API CHAR POSITIONS ${alt.length} chars: "${alt.substring(0, 200)}..."`);
+  
+  // Split into sentences and try to reconstruct with numbered bullets
+  const sentences = alt.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 10);
+  console.log(`highlightSpecialConditions: split into ${sentences.length} sentences for reconstruction`);
+  
+  // Try different reconstruction approaches
+  const reconstructionAttempts = [];
+  
+  for (let startNum = 1; startNum <= 15; startNum++) {
+    let reconstructed = '';
+    let bulletNum = startNum;
+    
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (trimmed.length > 15 && /^[A-Z]/.test(trimmed) && !trimmed.toLowerCase().startsWith('supplementary')) {
+        reconstructed += `${bulletNum}. ${trimmed} `;
+        bulletNum++;
+      } else {
+        reconstructed += `${trimmed} `;
+      }
+    }
+    
+    reconstructionAttempts.push(reconstructed.trim());
+  }
+  
+  let dashReconstructed = '';
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+    if (trimmed.length > 15 && /^[A-Z]/.test(trimmed) && !trimmed.toLowerCase().startsWith('supplementary')) {
+      dashReconstructed += `- ${trimmed} `;
+    } else {
+      dashReconstructed += `${trimmed} `;
+    }
+  }
+  reconstructionAttempts.push(dashReconstructed.trim());
+  
+  // Attempt 3: Try original text with some normalization
+  reconstructionAttempts.push(alt);
+  reconstructionAttempts.push(normalizeTextForMatching(alt));
+  
+  console.log(`highlightSpecialConditions: created ${reconstructionAttempts.length} reconstruction attempts`);
+  
+  for (let attemptIndex = 0; attemptIndex < reconstructionAttempts.length; attemptIndex++) {
+    const attempt = reconstructionAttempts[attemptIndex];
+    if (attempt.length > 100) {
+      console.log(`highlightSpecialConditions: trying reconstruction ${attemptIndex + 1}: "${attempt.substring(0, 150)}..."`);
+      
+      const currentLeftPanelText = $('#renderedText').text();
+      const foundInLeftPanel = currentLeftPanelText.toLowerCase().includes(attempt.toLowerCase());
+      
+      console.log(`highlightSpecialConditions: reconstruction ${attemptIndex + 1} found in left panel: ${foundInLeftPanel}`);
+      
+      if (foundInLeftPanel) {
+        console.log(`highlightSpecialConditions: attempting to highlight complete reconstruction ${attemptIndex + 1}`);
+        
+        mk.mark(attempt, {
+          element: 'span',
+          className: 'marked',
+          accuracy: 'partially',
+          separateWordSearch: false,
+          filter: function(node, term, totalCounter, counter) {
+            return counter === 1;
+          }
+        });
+        
+        const $hits = $box.find('.marked');
+        if ($hits.length > 0) {
+          console.log(`✓ highlightSpecialConditions: successfully highlighted complete text using reconstruction ${attemptIndex + 1}`);
+          scrollToMark($box);
+          return true;
+        }
+        mk.unmark();
+      }
+    }
+  }
+  
+  console.log(`highlightSpecialConditions: complete text reconstruction failed, trying sentence-by-sentence highlighting`);
+  
+  for (let sentenceIndex = 0; sentenceIndex < sentences.length; sentenceIndex++) {
+    const sentence = sentences[sentenceIndex].trim();
+    if (sentence.length > 20) {
+      console.log(`highlightSpecialConditions: trying individual sentence ${sentenceIndex + 1}: "${sentence.substring(0, 80)}..."`);
+      
+      const sentenceVariations = [
+        sentence,
+        normalizeTextForMatching(sentence)
+      ];
+      
+      // Add numbered bullets
+      for (let num = 1; num <= 25; num++) {
+        sentenceVariations.push(`${num}. ${sentence}`);
+      }
+      
+      sentenceVariations.push(`- ${sentence}`);
+      
+      const currentLeftPanelText = $('#renderedText').text();
+      
+      for (const sentenceVar of sentenceVariations) {
+        if (sentenceVar.length > 20 && currentLeftPanelText.toLowerCase().includes(sentenceVar.toLowerCase())) {
+          console.log(`highlightSpecialConditions: found individual sentence match: "${sentenceVar.substring(0, 80)}..."`);
+          
+          mk.mark(sentenceVar, {
+            element: 'span',
+            className: 'marked',
+            accuracy: 'partially',
+            separateWordSearch: false,
+            filter: function(node, term, totalCounter, counter) {
+              return counter === 1;
+            }
+          });
+          
+          const $hits = $box.find('.marked');
+          if ($hits.length > 0) {
+            console.log(`✓ highlightSpecialConditions: highlighted individual sentence ${sentenceIndex + 1}`);
+            highlightedAny = true;
+            break;
+          }
+        }
       }
     }
   }
@@ -1466,6 +1990,60 @@ function highlightSpecialConditions(alt, $box) {
     return true;
   }
   
+  console.log(`highlightSpecialConditions: segment highlighting failed, falling back to key phrases`);
+  
+  try {
+    const markInstance = new Mark($box[0]);
+    let highlightedAny = false;
+    
+    const keyPhrases = [
+      'This product does not have a Higher Lending Charge',
+      'Higher Lending Charge',
+      'Overpayments You may make overpayments',
+      'Overpayments',
+      'Pre-Payment Balance',
+      'Underpayments Arrangements',
+      'Underpayments',
+      'tracker rate mortgage',
+      'reference rate',
+      'floor rate',
+      'minimum reference rate',
+      'fourteen business days',
+      'six consecutive months'
+    ];
+    
+    for (const phrase of keyPhrases) {
+      if (alt.toLowerCase().includes(phrase.toLowerCase())) {
+        console.log(`highlightSpecialConditions: trying to highlight key phrase "${phrase}"`);
+        
+        markInstance.mark(phrase, {
+          accuracy: 'complementary',
+          className: 'marked',
+          separateWordSearch: false,
+          filter: function(node, term, totalCounter, counter) {
+            return counter === 1; // Only highlight the first occurrence of each phrase
+          }
+        });
+        
+        const $newHits = $box.find('.marked');
+        if ($newHits.length > 0) {
+          console.log(`✓ highlightSpecialConditions: highlighted key phrase "${phrase}"`);
+          highlightedAny = true;
+        }
+      }
+    }
+    
+    if (highlightedAny) {
+      console.log(`🎯 SPECIAL CONDITIONS HIGHLIGHTING: ✅ SUCCESS with key phrase approach`);
+      scrollToMark($box);
+      return true;
+    }
+    
+  } catch (error) {
+    console.error('highlightSpecialConditions: Error during key phrase highlighting:', error);
+  }
+  
+  console.log(`❌ highlightSpecialConditions: all strategies failed`);
   return false;
 }
 
